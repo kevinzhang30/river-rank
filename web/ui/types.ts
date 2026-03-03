@@ -1,0 +1,69 @@
+export type Street = "preflop" | "flop" | "turn" | "river" | "showdown";
+export type Mode = "ranked" | "unranked";
+
+export interface PublicPlayer {
+  userId:   string;
+  username: string;
+  stack:    number;
+  bet:      number;
+  isDealer: boolean;
+  isToAct:  boolean;
+  folded:   boolean;
+}
+
+export interface LegalActions {
+  canFold:     boolean;
+  canCheck:    boolean;
+  canCall:     boolean;
+  callAmount?: number;
+  minRaiseTo?: number;
+  maxRaiseTo?: number;
+}
+
+export interface LogEntry {
+  username: string;
+  action:   string;
+  amount?:  number;
+  at:       string;
+}
+
+export interface PublicGameState {
+  matchId:      string;
+  mode:         Mode;
+  street:       Street;
+  pot:          number;
+  board:        string[];
+  players:      [PublicPlayer, PublicPlayer];
+  log:          LogEntry[];
+  handNumber:   number;
+  smallBlind:   number;
+  bigBlind:     number;
+  legalActions?:  LegalActions;
+  handResult?:    HandResult;
+  turnDeadlineMs?: number;
+  handsUntilBlindIncrease?: number;
+  nextSmallBlind?:           number;
+  nextBigBlind?:             number;
+}
+
+export interface HandResult {
+  handId:       string;
+  winnerUserId: string | null;
+  pot:          number;
+  deltas:       Record<string, number>;
+  reason:       "FOLD" | "SHOWDOWN";
+  showUntilMs:  number;
+}
+
+export interface HeroPrivate {
+  holeCards: [string, string];
+}
+
+export interface LeaderboardEntry {
+  id:          string;
+  username:    string;
+  elo:         number;
+  gamesPlayed: number;
+  wins:        number;
+  losses:      number;
+}
