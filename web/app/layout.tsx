@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "RiverRank",
-  description: "Ranked poker duel"
+  description: "Ranked poker duels"
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
