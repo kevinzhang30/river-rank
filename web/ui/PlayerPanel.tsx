@@ -7,8 +7,8 @@ function DealerChip() {
   return (
     <span
       style={{
-        width:          18,
-        height:         18,
+        width:          20,
+        height:         20,
         borderRadius:   2,
         background:     "var(--surface2)",
         border:         "1px solid var(--border)",
