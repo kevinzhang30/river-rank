@@ -8,7 +8,7 @@ import { ThemeToggle } from "@/ui/ThemeToggle";
 import { DeckToggle } from "@/ui/DeckToggle";
 import type { LeaderboardEntry, Mode } from "@/ui/types";
 
-const BACKEND = "http://localhost:4000";
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4000";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

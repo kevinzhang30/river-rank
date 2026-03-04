@@ -14,7 +14,7 @@ import {
 } from "@/ui/adapters";
 import type { PublicGameState, PublicPlayer, Mode } from "@/ui/types";
 
-const BACKEND = "http://localhost:4000";
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4000";
 
 interface Opponent {
   userId:   string;
