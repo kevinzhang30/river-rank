@@ -548,17 +548,21 @@ function ChooseUsernameView({
 // ── Auth view ─────────────────────────────────────────────────────────────────
 
 function AuthView({
-  email, setEmail, sending, errorMsg, magicLinkSent,
-  onSend, onReset,
+  email, setEmail, password, setPassword,
+  mode, onToggleMode, submitting, errorMsg, onSubmit,
 }: {
-  email:         string;
-  setEmail:      (v: string) => void;
-  sending:       boolean;
-  errorMsg:      string | null;
-  magicLinkSent: boolean;
-  onSend:        () => void;
-  onReset:       () => void;
+  email:          string;
+  setEmail:       (v: string) => void;
+  password:       string;
+  setPassword:    (v: string) => void;
+  mode:           "signin" | "signup";
+  onToggleMode:   () => void;
+  submitting:     boolean;
+  errorMsg:       string | null;
+  onSubmit:       () => void;
 }) {
+  const disabled = submitting || !email.trim() || password.length < 6;
+
   return (
     <div
       style={{
@@ -594,77 +598,90 @@ function AuthView({
           gap:           "0.9rem",
         }}
       >
-        {magicLinkSent ? (
-          <>
-            <p style={{ margin: 0, color: "var(--text2)", fontSize: 13, lineHeight: 1.6 }}>
-              Check your email for a magic link to sign in.
-            </p>
-            <button
-              onClick={onReset}
-              style={{
-                background:    "transparent",
-                color:         "var(--primaryBtn)",
-                border:        "1px solid var(--primaryBtn)",
-                borderRadius:  4,
-                padding:       "0.65rem 1.25rem",
-                fontSize:      "0.9rem",
-                fontFamily:    "monospace",
-                fontWeight:    700,
-                cursor:        "pointer",
-                width:         "100%",
-                letterSpacing: 0.3,
-              }}
-            >
-              Use a different email
-            </button>
-          </>
-        ) : (
-          <>
-            <p style={{ margin: 0, color: "var(--text2)", fontSize: 13 }}>Sign in to play</p>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && onSend()}
-              placeholder="you@example.com"
-              autoFocus
-              style={{
-                background:   "var(--surface2)",
-                border:       "1px solid var(--border)",
-                borderRadius: 4,
-                color:        "var(--text)",
-                padding:      "0.6rem 0.9rem",
-                fontSize:     "0.9rem",
-                fontFamily:   "monospace",
-                outline:      "none",
-                width:        "100%",
-                boxSizing:    "border-box",
-              }}
-            />
-            {errorMsg && (
-              <p style={{ margin: 0, color: "var(--danger)", fontSize: 12 }}>{errorMsg}</p>
-            )}
-            <button
-              onClick={onSend}
-              disabled={sending || !email.trim()}
-              style={{
-                background:    sending || !email.trim() ? "var(--surface2)" : "var(--primaryBtn)",
-                color:         sending || !email.trim() ? "var(--text3)"    : "var(--primaryBtnText)",
-                border:        "1px solid transparent",
-                borderRadius:  4,
-                padding:       "0.65rem 1.25rem",
-                fontSize:      "0.9rem",
-                fontFamily:    "monospace",
-                fontWeight:    700,
-                cursor:        sending || !email.trim() ? "not-allowed" : "pointer",
-                width:         "100%",
-                letterSpacing: 0.3,
-              }}
-            >
-              {sending ? "Sending…" : "Send magic link"}
-            </button>
-          </>
+        <p style={{ margin: 0, color: "var(--text2)", fontSize: 13 }}>
+          {mode === "signin" ? "Sign in to play" : "Create an account"}
+        </p>
+
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && onSubmit()}
+          placeholder="you@example.com"
+          autoFocus
+          style={{
+            background:   "var(--surface2)",
+            border:       "1px solid var(--border)",
+            borderRadius: 4,
+            color:        "var(--text)",
+            padding:      "0.6rem 0.9rem",
+            fontSize:     "0.9rem",
+            fontFamily:   "monospace",
+            outline:      "none",
+            width:        "100%",
+            boxSizing:    "border-box",
+          }}
+        />
+
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && onSubmit()}
+          placeholder="password (min 6 chars)"
+          style={{
+            background:   "var(--surface2)",
+            border:       "1px solid var(--border)",
+            borderRadius: 4,
+            color:        "var(--text)",
+            padding:      "0.6rem 0.9rem",
+            fontSize:     "0.9rem",
+            fontFamily:   "monospace",
+            outline:      "none",
+            width:        "100%",
+            boxSizing:    "border-box",
+          }}
+        />
+
+        {errorMsg && (
+          <p style={{ margin: 0, color: "var(--danger)", fontSize: 12 }}>{errorMsg}</p>
         )}
+
+        <button
+          onClick={onSubmit}
+          disabled={disabled}
+          style={{
+            background:    disabled ? "var(--surface2)" : "var(--primaryBtn)",
+            color:         disabled ? "var(--text3)"    : "var(--primaryBtnText)",
+            border:        "1px solid transparent",
+            borderRadius:  4,
+            padding:       "0.65rem 1.25rem",
+            fontSize:      "0.9rem",
+            fontFamily:    "monospace",
+            fontWeight:    700,
+            cursor:        disabled ? "not-allowed" : "pointer",
+            width:         "100%",
+            letterSpacing: 0.3,
+          }}
+        >
+          {submitting ? "…" : mode === "signin" ? "Sign in" : "Create account"}
+        </button>
+
+        <button
+          onClick={onToggleMode}
+          style={{
+            background:    "transparent",
+            color:         "var(--text3)",
+            border:        "none",
+            fontSize:      12,
+            fontFamily:    "monospace",
+            cursor:        "pointer",
+            padding:       0,
+            textAlign:     "center",
+          }}
+        >
+          {mode === "signin" ? "No account? Sign up" : "Already have an account? Sign in"}
+        </button>
       </div>
     </div>
   );
@@ -681,8 +698,9 @@ export default function Page() {
   const [authChecked, setAuthChecked]     = useState(false);
 
   const [email, setEmail]                 = useState("");
-  const [magicLinkSent, setMagicLinkSent] = useState(false);
-  const [sending, setSending]             = useState(false);
+  const [password, setPassword]           = useState("");
+  const [authMode, setAuthMode]           = useState<"signin" | "signup">("signin");
+  const [submitting, setSubmitting]       = useState(false);
   const [errorMsg, setErrorMsg]           = useState<string | null>(null);
 
   const [leaderboard, setLeaderboard]     = useState<LeaderboardEntry[]>([]);
@@ -741,17 +759,26 @@ export default function Page() {
       .catch(() => {});
   }, []);
 
-  async function sendMagicLink() {
-    if (!email.trim()) return;
-    setSending(true);
+  async function submitAuth() {
+    if (!email.trim() || password.length < 6) return;
+    setSubmitting(true);
     setErrorMsg(null);
-    const { error } = await supabase.auth.signInWithOtp({
-      email: email.trim(),
-      options: { shouldCreateUser: true },
-    });
-    setSending(false);
-    if (error) setErrorMsg(error.message);
-    else setMagicLinkSent(true);
+
+    if (authMode === "signin") {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+      if (error) setErrorMsg(error.message);
+    } else {
+      const { error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+      });
+      if (error) setErrorMsg(error.message);
+    }
+
+    setSubmitting(false);
   }
 
   async function signOut() {
@@ -765,11 +792,13 @@ export default function Page() {
       <AuthView
         email={email}
         setEmail={setEmail}
-        sending={sending}
+        password={password}
+        setPassword={setPassword}
+        mode={authMode}
+        onToggleMode={() => { setAuthMode((m) => m === "signin" ? "signup" : "signin"); setErrorMsg(null); }}
+        submitting={submitting}
         errorMsg={errorMsg}
-        magicLinkSent={magicLinkSent}
-        onSend={sendMagicLink}
-        onReset={() => { setMagicLinkSent(false); setEmail(""); }}
+        onSubmit={submitAuth}
       />
     );
   }
