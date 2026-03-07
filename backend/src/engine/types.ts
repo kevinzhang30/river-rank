@@ -88,6 +88,8 @@ export interface InternalGameState {
   turnDurationMs:  number;
   /** Unix timestamp when the current player's turn expires. 0 = no active timer. */
   turnDeadlineMs:  number;
+  /** Set to true the moment match-end is triggered; prevents double-recording. */
+  ended?:          boolean;
 }
 
 // ── Hand result (broadcast after each hand ends) ─────────────────────────────
