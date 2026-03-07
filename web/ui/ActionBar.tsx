@@ -199,6 +199,7 @@ export function ActionBar({ legal, pot, bigBlind, onFold, onCheck, onCall, onRai
             min={min}
             max={max}
             onChange={(e) => setRawInput(e.target.value)}
+            onFocus={(e) => e.target.select()}
             onBlur={clampInput}
             onKeyDown={(e) => e.key === "Enter" && handleRaiseSubmit()}
             style={{

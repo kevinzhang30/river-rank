@@ -17,7 +17,6 @@ import { getLegalActions, validateAction, ActionError } from "./engine/betting";
 import { showdownWinner } from "./engine/handEvaluator";
 import { prisma } from "./db";
 import { supabaseAdmin } from "./db/supabaseAdmin";
-import { eloUpdate } from "./rating/elo";
 
 // ── User type ─────────────────────────────────────────────────────────────────
 
@@ -421,14 +420,25 @@ function applyAction(state: InternalGameState, playerId: string, action: string,
 
 // ── Hand lifecycle ────────────────────────────────────────────────────────────
 
+interface EndMatchResult {
+  p1Delta:     number;
+  p2Delta:     number;
+  p1EloBefore: number;
+  p2EloBefore: number;
+  p1EloAfter:  number;
+  p2EloAfter:  number;
+  winnerId:    string | null;
+  ranked:      boolean;
+}
+
 async function recordMatchEnd(
   state:        InternalGameState,
   winnerUserId: string,
-): Promise<void> {
+): Promise<EndMatchResult | null> {
   const p1 = state.players[0].id;
   const p2 = state.players[1].id;
 
-  const { error } = await supabaseAdmin.rpc("end_match", {
+  const { data, error } = await supabaseAdmin.rpc("end_match", {
     p_match_id: state.matchId,
     p_p1:       p1,
     p_p2:       p2,
@@ -437,6 +447,7 @@ async function recordMatchEnd(
   });
 
   if (error) throw error;
+  return data as EndMatchResult | null; // null = duplicate call
 }
 
 function endHand(state: InternalGameState, winnerIndex: 0 | 1, reason: "FOLD" | "SHOWDOWN"): void {
@@ -478,26 +489,59 @@ function endHand(state: InternalGameState, winnerIndex: 0 | 1, reason: "FOLD" | 
   emitGameState(state);
 
   if (loser.stack === 0) {
-    // Match is over — loser is busted
-    let ratingDelta: Record<string, number> | null = null;
-    if (state.mode === "ranked") {
-      const winnerElo = state.playerElos[winner.id] ?? 1200;
-      const loserElo  = state.playerElos[loser.id]  ?? 1200;
-      const { deltaA, deltaB } = eloUpdate(winnerElo, loserElo, 1);
-      ratingDelta = { [winner.id]: deltaA, [loser.id]: deltaB };
-    }
-    recordMatchEnd(state, winner.id).catch((err) =>
-      console.error("[db] recordMatchEnd failed:", err),
-    );
-    io.to(`match:${state.matchId}`).emit("match.ended", {
-      matchId:        state.matchId,
-      winnerId:       winner.id,
-      winnerUsername: winner.username,
-      ranked:         state.mode === "ranked",
-      ratingDelta,
-    });
-    console.log(`[match.ended] winner=${winner.username} match=${state.matchId.slice(0, 8)}`);
+    // ── In-memory guard: prevent double-recording if endHand is somehow called twice ──
+    if (state.ended) return;
+    state.ended = true;
+
+    // Remove from active matches immediately so no further actions are accepted.
     matches.delete(state.matchId);
+
+    const matchId        = state.matchId;
+    const winnerUsername = winner.username;
+    const winnerId       = winner.id;
+    const ranked         = state.mode === "ranked";
+    const p1             = state.players[0];
+    const p2             = state.players[1];
+
+    // Async: call RPC (DB guard), then emit match.ended with authoritative deltas.
+    (async () => {
+      let ratingDelta: Record<string, number> | null = null;
+      try {
+        const result = await recordMatchEnd(state, winnerId);
+
+        if (result === null) {
+          // DB guard fired — already recorded, skip emit to avoid duplicate.
+          console.warn(`[match.ended] duplicate RPC call for ${matchId.slice(0, 8)}, skipping`);
+          return;
+        }
+
+        if (ranked) {
+          ratingDelta = { [p1.id]: result.p1Delta, [p2.id]: result.p2Delta };
+          console.log(
+            `[match.ended] winnerId=${winnerId.slice(0, 8)} ranked=true` +
+            ` ${p1.username}: ${result.p1EloBefore}→${result.p1EloAfter}` +
+            ` (${result.p1Delta >= 0 ? "+" : ""}${result.p1Delta})` +
+            ` ${p2.username}: ${result.p2EloBefore}→${result.p2EloAfter}` +
+            ` (${result.p2Delta >= 0 ? "+" : ""}${result.p2Delta})`,
+          );
+        } else {
+          console.log(
+            `[match.ended] winnerId=${winnerId.slice(0, 8)} ranked=false winner=${winnerUsername}`,
+          );
+        }
+      } catch (err) {
+        console.error("[db] recordMatchEnd failed:", err);
+      }
+
+      io.to(`match:${matchId}`).emit("match.ended", {
+        matchId,
+        winnerId,
+        winnerUsername,
+        ranked,
+        ratingDelta,
+      });
+    })();
+
     return;
   }
 
