@@ -8,6 +8,7 @@ import { ActionBar } from "./ActionBar";
 import { ActionLog } from "./ActionLog";
 import { ThemeToggle } from "./ThemeToggle";
 import { DeckToggle } from "./DeckToggle";
+import { HandCheatSheet } from "./HandCheatSheet";
 
 const STREET_LABEL: Record<string, string> = {
   preflop:  "PREFLOP",
@@ -25,6 +26,7 @@ interface Props {
   onCheck?:      () => void;
   onCall?:       () => void;
   onRaise?:      (amount: number) => void;
+  onReveal?:     (cards: string[]) => void;
 }
 
 export function PokerTable({
@@ -35,9 +37,12 @@ export function PokerTable({
   onCheck,
   onCall,
   onRaise,
+  onReveal,
 }: Props) {
   const [, setTick] = useState(0);
   const handResultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showCheatSheet, setShowCheatSheet] = useState(false);
+  const [pickingCard, setPickingCard] = useState(false);
 
   // 250ms interval: keeps the turn countdown ticking smoothly
   useEffect(() => {
@@ -57,6 +62,11 @@ export function PokerTable({
     return () => { if (handResultTimerRef.current) clearTimeout(handResultTimerRef.current); };
   }, [state.handResult?.handId]);
 
+  // Reset pick-card mode when hand changes
+  useEffect(() => {
+    setPickingCard(false);
+  }, [state.handResult?.handId]);
+
   const activeHandResult: HandResult | null =
     state.handResult && Date.now() < state.handResult.showUntilMs
       ? state.handResult
@@ -64,6 +74,22 @@ export function PokerTable({
 
   const hero     = state.players.find((p) => p.userId === heroUserId) ?? state.players[1];
   const opponent = state.players.find((p) => p.userId !== heroUserId) ?? state.players[0];
+
+  // Derive per-player showdown / reveal data
+  const opponentRevealedCards: string[] | null =
+    activeHandResult?.showdown?.holeCards?.[opponent.userId]
+      ? [...activeHandResult.showdown.holeCards[opponent.userId]]
+      : activeHandResult?.reveals?.[opponent.userId] ?? null;
+
+  const opponentCategory = activeHandResult?.showdown?.hands?.[opponent.userId]?.category ?? null;
+  const heroCategory     = activeHandResult?.showdown?.hands?.[heroUserId]?.category ?? null;
+
+  // Show reveal buttons only after a fold, before hero has revealed
+  const showRevealButtons =
+    activeHandResult !== null &&
+    activeHandResult.reason === "FOLD" &&
+    !activeHandResult.reveals?.[heroUserId] &&
+    heroHoleCards !== null;
 
   const legal = state.legalActions ?? (
     hero.isToAct && !hero.folded
@@ -159,6 +185,28 @@ export function PokerTable({
           >
             {state.mode}
           </span>
+          <button
+            onClick={() => setShowCheatSheet(true)}
+            title="Hand rankings"
+            style={{
+              background:    "transparent",
+              color:         "var(--text3)",
+              border:        "1px solid var(--border)",
+              borderRadius:  2,
+              width:         22,
+              height:        22,
+              display:       "flex",
+              alignItems:    "center",
+              justifyContent: "center",
+              fontSize:      11,
+              fontWeight:    700,
+              cursor:        "pointer",
+              padding:       0,
+              flexShrink:    0,
+            }}
+          >
+            ?
+          </button>
           <DeckToggle />
           <ThemeToggle />
         </div>
@@ -186,6 +234,8 @@ export function PokerTable({
             isHero={false}
             handResult={activeHandResult}
             turnDeadlineMs={state.turnDeadlineMs}
+            revealedCards={opponentRevealedCards}
+            handCategory={opponentCategory}
           />
 
           {/* Board */}
@@ -209,6 +259,9 @@ export function PokerTable({
                       ? "SPLIT POT"
                       : `${state.players.find(p => p.userId === activeHandResult.winnerUserId)?.username ?? "?"} WINS $${activeHandResult.pot}`
                     }
+                  </span>
+                  <span style={{ color: "var(--text3)", fontSize: 9, letterSpacing: 1, fontVariantNumeric: "tabular-nums" }}>
+                    NEXT HAND IN {Math.max(0, Math.ceil((activeHandResult.showUntilMs - Date.now()) / 1000))}s
                   </span>
                 </div>
               ) : state.pot > 0 ? (
@@ -236,13 +289,98 @@ export function PokerTable({
           </div>
 
           {/* Hero */}
-          <PlayerPanel
-            player={hero}
-            isHero={true}
-            holeCards={heroHoleCards}
-            handResult={activeHandResult}
-            turnDeadlineMs={state.turnDeadlineMs}
-          />
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+            <PlayerPanel
+              player={hero}
+              isHero={true}
+              holeCards={heroHoleCards}
+              handResult={activeHandResult}
+              turnDeadlineMs={state.turnDeadlineMs}
+              handCategory={heroCategory}
+            />
+
+            {/* Reveal buttons (fold only, before hero reveals) */}
+            {showRevealButtons && !pickingCard && (
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={() => { onReveal?.(heroHoleCards!); }}
+                  style={{
+                    background:    "transparent",
+                    color:         "var(--text2)",
+                    border:        "1px solid var(--border)",
+                    borderRadius:  3,
+                    padding:       "4px 12px",
+                    fontSize:      10,
+                    fontWeight:    700,
+                    cursor:        "pointer",
+                    fontFamily:    "monospace",
+                    letterSpacing: 1,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Show Hand
+                </button>
+                <button
+                  onClick={() => setPickingCard(true)}
+                  style={{
+                    background:    "transparent",
+                    color:         "var(--text3)",
+                    border:        "1px solid var(--border)",
+                    borderRadius:  3,
+                    padding:       "4px 12px",
+                    fontSize:      10,
+                    fontWeight:    700,
+                    cursor:        "pointer",
+                    fontFamily:    "monospace",
+                    letterSpacing: 1,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Show Card
+                </button>
+              </div>
+            )}
+
+            {/* Pick-a-card mode */}
+            {showRevealButtons && pickingCard && heroHoleCards && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ color: "var(--text3)", fontSize: 10, letterSpacing: 1 }}>PICK ONE:</span>
+                {heroHoleCards.map((card, i) => (
+                  <button
+                    key={i}
+                    onClick={() => { onReveal?.([card]); setPickingCard(false); }}
+                    style={{
+                      background:    "var(--surface2)",
+                      color:         "var(--text)",
+                      border:        "1px solid var(--border)",
+                      borderRadius:  3,
+                      padding:       "4px 14px",
+                      fontSize:      13,
+                      fontWeight:    700,
+                      cursor:        "pointer",
+                      fontFamily:    "monospace",
+                      letterSpacing: 0.5,
+                    }}
+                  >
+                    {card}
+                  </button>
+                ))}
+                <button
+                  onClick={() => setPickingCard(false)}
+                  style={{
+                    background: "none",
+                    border:     "none",
+                    color:      "var(--text3)",
+                    fontSize:   13,
+                    cursor:     "pointer",
+                    padding:    "0 4px",
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Activity log */}
@@ -259,6 +397,8 @@ export function PokerTable({
         onCall={onCall}
         onRaise={onRaise}
       />
+
+      {showCheatSheet && <HandCheatSheet onClose={() => setShowCheatSheet(false)} />}
     </div>
   );
 }
