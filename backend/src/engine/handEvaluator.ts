@@ -92,16 +92,20 @@ function compareHandRanks(a: HandRank, b: HandRank): 1 | -1 | 0 {
 }
 
 /** Best 5-card hand from 2 hole cards + up to 5 board cards. */
-export function bestHand(holeCards: [Card, Card], board: Card[]): HandRank {
+export function bestHand(holeCards: [Card, Card], board: Card[]): HandRank & { bestCards: Card[] } {
   const all    = [...holeCards, ...board];
   const combos = combinations5(all.length);
   let best: HandRank | null = null;
+  let bestCards: Card[] = [];
   for (const indices of combos) {
     const five = indices.map((i) => all[i]) as Card[];
     const rank = eval5(five);
-    if (best === null || compareHandRanks(rank, best) > 0) best = rank;
+    if (best === null || compareHandRanks(rank, best) > 0) {
+      best = rank;
+      bestCards = five;
+    }
   }
-  return best!;
+  return { ...best!, bestCards };
 }
 
 /**

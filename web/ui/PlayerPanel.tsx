@@ -33,9 +33,11 @@ interface Props {
   holeCards?:      [string, string] | null;
   handResult?:     HandResult | null;
   turnDeadlineMs?: number;
+  revealedCards?:  string[] | null;
+  handCategory?:   string | null;
 }
 
-export function PlayerPanel({ player, isHero, holeCards, handResult, turnDeadlineMs }: Props) {
+export function PlayerPanel({ player, isHero, holeCards, handResult, turnDeadlineMs, revealedCards, handCategory }: Props) {
   const active = player.isToAct && !player.folded;
 
   const isWinner = !!handResult && handResult.winnerUserId === player.userId;
@@ -106,6 +108,13 @@ export function PlayerPanel({ player, isHero, holeCards, handResult, turnDeadlin
         )}
         {badge}
       </div>
+
+      {/* Hand category (shown at showdown) */}
+      {handResult && handCategory && (
+        <div style={{ color: "var(--text3)", fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase" }}>
+          {handCategory.replace(/_/g, " ")}
+        </div>
+      )}
 
       {/* Stack + bet + delta */}
       <div style={{ display: "flex", gap: 16, fontFamily: "monospace", alignItems: "baseline" }}>
@@ -183,8 +192,17 @@ export function PlayerPanel({ player, isHero, holeCards, handResult, turnDeadlin
     </div>
   ) : (
     <div style={{ display: "flex", gap: 5 }}>
-      <FacedownCard size="sm" />
-      <FacedownCard size="sm" />
+      {revealedCards && revealedCards.length > 0 ? (
+        <>
+          {revealedCards[0] ? <Card card={revealedCards[0]} size="sm" /> : <FacedownCard size="sm" />}
+          {revealedCards[1] ? <Card card={revealedCards[1]} size="sm" /> : <FacedownCard size="sm" />}
+        </>
+      ) : (
+        <>
+          <FacedownCard size="sm" />
+          <FacedownCard size="sm" />
+        </>
+      )}
     </div>
   );
 

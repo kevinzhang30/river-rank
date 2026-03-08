@@ -158,6 +158,11 @@ function GameView() {
     socketRef.current?.emit("game.action", { matchId, action, amount });
   }
 
+  function sendReveal(cards: string[]) {
+    if (!matchId) return;
+    socketRef.current?.emit("hand.reveal", { matchId, cards });
+  }
+
   function backToLobby() {
     socketRef.current?.disconnect();
     router.push("/");
@@ -232,6 +237,7 @@ function GameView() {
           onCheck={() => sendAction("CHECK")}
           onCall={() => sendAction("CALL")}
           onRaise={(amount) => sendAction("RAISE_TO", amount)}
+          onReveal={sendReveal}
         />
         <DebugPanel state={debugState} />
 

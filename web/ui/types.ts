@@ -53,6 +53,11 @@ export interface HandResult {
   deltas:       Record<string, number>;
   reason:       "FOLD" | "SHOWDOWN";
   showUntilMs:  number;
+  showdown?: {
+    holeCards: Record<string, [string, string]>;
+    hands:     Record<string, { category: string; cards: string[] }>;
+  };
+  reveals?: Record<string, string[]>;
 }
 
 export interface HeroPrivate {

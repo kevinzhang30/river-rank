@@ -101,6 +101,13 @@ export interface HandResult {
   deltas:       Record<string, number>; // userId → net chip change for this hand
   reason:       "FOLD" | "SHOWDOWN";
   showUntilMs:  number;
+  /** Populated at showdown: both players' hole cards + best hand category/cards. */
+  showdown?: {
+    holeCards: Record<string, [string, string]>;
+    hands:     Record<string, { category: string; cards: string[] }>;
+  };
+  /** Cards voluntarily revealed by each player during inter-hand pause. */
+  reveals?: Record<string, string[]>;
 }
 
 // ── Legal actions (sent to hero only) ────────────────────────────────────────

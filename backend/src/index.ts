@@ -14,7 +14,7 @@ import type {
 } from "./engine/types";
 import { newDeck, shuffle } from "./engine/deck";
 import { getLegalActions, validateAction, ActionError } from "./engine/betting";
-import { showdownWinner } from "./engine/handEvaluator";
+import { showdownWinner, bestHand } from "./engine/handEvaluator";
 import { decideBotAction } from "./bot/strategy";
 import type { BotDifficulty } from "./bot/strategy";
 import { prisma } from "./db";
@@ -279,6 +279,19 @@ function resolveShowdown(state: InternalGameState): void {
   const h1 = state.holeCards[state.players[1].id];
   const result = showdownWinner(h0, h1, state.board);
 
+  const best0 = bestHand(h0, state.board);
+  const best1 = bestHand(h1, state.board);
+  const showdownInfo: HandResult["showdown"] = {
+    holeCards: {
+      [state.players[0].id]: h0,
+      [state.players[1].id]: h1,
+    },
+    hands: {
+      [state.players[0].id]: { category: best0.category, cards: best0.bestCards },
+      [state.players[1].id]: { category: best1.category, cards: best1.bestCards },
+    },
+  };
+
   if (result === -1) {
     // Chop: split pot evenly
     const half    = Math.floor(state.pot / 2);
@@ -299,7 +312,9 @@ function resolveShowdown(state: InternalGameState): void {
       pot:          chopPot,
       deltas:       chopDeltas,
       reason:       "SHOWDOWN",
-      showUntilMs:  Date.now() + 2500,
+      showUntilMs:  Date.now() + 12_000,
+      showdown:     showdownInfo,
+      reveals:      {},
     };
 
     state.log.push({
@@ -311,11 +326,11 @@ function resolveShowdown(state: InternalGameState): void {
     });
     emitGameState(state);
     state.handNumber++;
-    setTimeout(() => startNextHand(state), 2500);
+    setTimeout(() => startNextHand(state), 12_000);
   } else {
     // Winner takes pot — show showdown board first, then award
     emitGameState(state);
-    endHand(state, result, "SHOWDOWN");
+    endHand(state, result, "SHOWDOWN", showdownInfo);
   }
 }
 
@@ -510,7 +525,7 @@ async function recordMatchEnd(
   return data as EndMatchResult | null; // null = duplicate call
 }
 
-function endHand(state: InternalGameState, winnerIndex: 0 | 1, reason: "FOLD" | "SHOWDOWN"): void {
+function endHand(state: InternalGameState, winnerIndex: 0 | 1, reason: "FOLD" | "SHOWDOWN", showdownInfo?: HandResult["showdown"]): void {
   const loserIndex         = winnerIndex === 0 ? 1 : 0;
   const winner             = state.players[winnerIndex];
   const loser              = state.players[loserIndex];
@@ -534,7 +549,9 @@ function endHand(state: InternalGameState, winnerIndex: 0 | 1, reason: "FOLD" | 
     pot:          winAmount,
     deltas,
     reason,
-    showUntilMs:  Date.now() + 2500,
+    showUntilMs:  Date.now() + 12_000,
+    showdown:     showdownInfo,
+    reveals:      {},
   };
 
   state.log.push({
@@ -625,7 +642,7 @@ function endHand(state: InternalGameState, winnerIndex: 0 | 1, reason: "FOLD" | 
     console.log(`[blinds] hand #${state.handNumber} → ${state.smallBlind}/${state.bigBlind}`);
   }
 
-  setTimeout(() => startNextHand(state), 2500);
+  setTimeout(() => startNextHand(state), 12_000);
 }
 
 function startNewHand(state: InternalGameState): void {
@@ -894,6 +911,27 @@ io.on("connection", (socket: Socket) => {
         ` action=${action}${amount !== undefined ? ` amount=${amount}` : ""}`,
       );
       applyAction(state, user.userId, action, amount);
+    },
+  );
+
+  socket.on(
+    "hand.reveal",
+    ({ matchId, cards }: { matchId: string; cards: string[] }) => {
+      const user = users.get(socket.id);
+      if (!user) return;
+      const state = matches.get(matchId);
+      if (!state || !state.handResult) return;
+      if (Date.now() >= state.handResult.showUntilMs) return;
+
+      // Validate: cards must be a non-empty subset of the player's actual hole cards
+      const playerHoleCards = state.holeCards[user.userId];
+      if (!playerHoleCards) return;
+      const validCards = cards.filter((c) => playerHoleCards.includes(c));
+      if (validCards.length === 0) return;
+
+      if (!state.handResult.reveals) state.handResult.reveals = {};
+      state.handResult.reveals[user.userId] = validCards;
+      emitGameState(state);
     },
   );
 
