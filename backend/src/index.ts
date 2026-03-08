@@ -15,6 +15,8 @@ import type {
 import { newDeck, shuffle } from "./engine/deck";
 import { getLegalActions, validateAction, ActionError } from "./engine/betting";
 import { showdownWinner } from "./engine/handEvaluator";
+import { decideBotAction } from "./bot/strategy";
+import type { BotDifficulty } from "./bot/strategy";
 import { prisma } from "./db";
 import { supabaseAdmin } from "./db/supabaseAdmin";
 
@@ -27,6 +29,11 @@ interface User {
   elo:      number;
 }
 
+// ── Bot constants ─────────────────────────────────────────────────────────────
+
+const BOT_ID               = "00000000-0000-0000-0000-000000000000";
+const BOT_QUEUE_TIMEOUT_MS = 20_000;
+
 // ── Turn timer ────────────────────────────────────────────────────────────────
 
 const TURN_DURATION_MS         = 15_000;
@@ -38,6 +45,11 @@ const users      = new Map<string, User>();
 const queues: Record<Mode, User[]> = { ranked: [], unranked: [] };
 const matches    = new Map<string, InternalGameState>();
 let matchCounter = 0;
+
+// bot state
+const botDifficulties = new Map<string, BotDifficulty>(); // matchId → difficulty
+const botTimers       = new Map<string, ReturnType<typeof setTimeout>>(); // matchId → timer
+const queueTimers     = new Map<string, ReturnType<typeof setTimeout>>(); // userId → timer
 
 // ── Server setup ──────────────────────────────────────────────────────────────
 
@@ -74,6 +86,24 @@ app.get("/leaderboard", async (_req, res) => {
   });
   res.json(top);
 });
+
+// ── Bot helpers ───────────────────────────────────────────────────────────────
+
+function makeBotUser(): User {
+  return { userId: BOT_ID, username: "RiverBot", socketId: "", elo: 1200 };
+}
+
+function getBotDifficulty(mode: Mode, elo: number): BotDifficulty {
+  if (mode === "unranked") return "easy";
+  if (elo < 1100) return "easy";
+  if (elo <= 1300) return "medium";
+  return "hard";
+}
+
+function clearQueueTimer(userId: string): void {
+  const t = queueTimers.get(userId);
+  if (t) { clearTimeout(t); queueTimers.delete(userId); }
+}
 
 // ── State serialization ───────────────────────────────────────────────────────
 
@@ -133,6 +163,7 @@ function emitGameState(state: InternalGameState): void {
   const pub = toPublicState(state);
 
   for (const player of state.players) {
+    if (player.id === BOT_ID) continue; // bot has no socket
     const socketId = state.socketIds[player.id];
     const socket   = io.sockets.sockets.get(socketId);
     if (!socket) continue;
@@ -146,6 +177,35 @@ function emitGameState(state: InternalGameState): void {
       publicState:   { ...pub, legalActions: heroLegal },
       heroHoleCards: state.holeCards[player.id] ?? [],
     });
+  }
+
+  // Schedule bot turn if it's the bot's turn to act
+  if (state.toActId === BOT_ID && state.street !== "SHOWDOWN" && !state.ended) {
+    const existing = botTimers.get(state.matchId);
+    if (existing) clearTimeout(existing);
+
+    const delay = 1000 + Math.random() * 1500; // 1000–2500 ms
+    const timer = setTimeout(() => {
+      botTimers.delete(state.matchId);
+      if (state.toActId !== BOT_ID || state.street === "SHOWDOWN" || state.ended) return;
+
+      const legal      = getLegalActions(state, BOT_ID);
+      const holeCards  = state.holeCards[BOT_ID];
+      if (!holeCards) return;
+
+      const difficulty = botDifficulties.get(state.matchId) ?? "easy";
+      const { action, amount } = decideBotAction(
+        holeCards, state.board, state.street,
+        legal, state.pot, state.bigBlind, difficulty,
+      );
+
+      console.log(
+        `[bot] RiverBot acting — action=${action}${amount !== undefined ? ` amount=${amount}` : ""}`,
+      );
+      applyAction(state, BOT_ID, action, amount);
+    }, delay);
+
+    botTimers.set(state.matchId, timer);
   }
 }
 
@@ -496,37 +556,49 @@ function endHand(state: InternalGameState, winnerIndex: 0 | 1, reason: "FOLD" | 
     // Remove from active matches immediately so no further actions are accepted.
     matches.delete(state.matchId);
 
+    // Clean up bot-specific state
+    const existingBotTimer = botTimers.get(state.matchId);
+    if (existingBotTimer) { clearTimeout(existingBotTimer); botTimers.delete(state.matchId); }
+    botDifficulties.delete(state.matchId);
+
     const matchId        = state.matchId;
     const winnerUsername = winner.username;
     const winnerId       = winner.id;
     const ranked         = state.mode === "ranked";
     const p1             = state.players[0];
     const p2             = state.players[1];
+    const isBotMatch     = p1.id === BOT_ID || p2.id === BOT_ID;
 
     // Async: call RPC (DB guard), then emit match.ended with authoritative deltas.
     (async () => {
       let ratingDelta: Record<string, number> | null = null;
       try {
-        const result = await recordMatchEnd(state, winnerId);
+        if (!isBotMatch) {
+          const result = await recordMatchEnd(state, winnerId);
 
-        if (result === null) {
-          // DB guard fired — already recorded, skip emit to avoid duplicate.
-          console.warn(`[match.ended] duplicate RPC call for ${matchId.slice(0, 8)}, skipping`);
-          return;
-        }
+          if (result === null) {
+            // DB guard fired — already recorded, skip emit to avoid duplicate.
+            console.warn(`[match.ended] duplicate RPC call for ${matchId.slice(0, 8)}, skipping`);
+            return;
+          }
 
-        if (ranked) {
-          ratingDelta = { [p1.id]: result.p1Delta, [p2.id]: result.p2Delta };
-          console.log(
-            `[match.ended] winnerId=${winnerId.slice(0, 8)} ranked=true` +
-            ` ${p1.username}: ${result.p1EloBefore}→${result.p1EloAfter}` +
-            ` (${result.p1Delta >= 0 ? "+" : ""}${result.p1Delta})` +
-            ` ${p2.username}: ${result.p2EloBefore}→${result.p2EloAfter}` +
-            ` (${result.p2Delta >= 0 ? "+" : ""}${result.p2Delta})`,
-          );
+          if (ranked) {
+            ratingDelta = { [p1.id]: result.p1Delta, [p2.id]: result.p2Delta };
+            console.log(
+              `[match.ended] winnerId=${winnerId.slice(0, 8)} ranked=true` +
+              ` ${p1.username}: ${result.p1EloBefore}→${result.p1EloAfter}` +
+              ` (${result.p1Delta >= 0 ? "+" : ""}${result.p1Delta})` +
+              ` ${p2.username}: ${result.p2EloBefore}→${result.p2EloAfter}` +
+              ` (${result.p2Delta >= 0 ? "+" : ""}${result.p2Delta})`,
+            );
+          } else {
+            console.log(
+              `[match.ended] winnerId=${winnerId.slice(0, 8)} ranked=false winner=${winnerUsername}`,
+            );
+          }
         } else {
           console.log(
-            `[match.ended] winnerId=${winnerId.slice(0, 8)} ranked=false winner=${winnerUsername}`,
+            `[match.ended] bot match winnerId=${winnerId.slice(0, 8)} winner=${winnerUsername}`,
           );
         }
       } catch (err) {
@@ -617,7 +689,7 @@ function startNewHand(state: InternalGameState): void {
 
 // ── Match factory ─────────────────────────────────────────────────────────────
 
-async function createMatch(p1: User, p2: User, mode: Mode): Promise<void> {
+async function createMatch(p1: User, p2: User, mode: Mode, botDifficulty?: BotDifficulty): Promise<void> {
   const matchId = uuidv4();
   const config  = DEFAULT_CONFIG;
 
@@ -658,6 +730,7 @@ async function createMatch(p1: User, p2: User, mode: Mode): Promise<void> {
   };
 
   matches.set(matchId, state);
+  if (botDifficulty) botDifficulties.set(matchId, botDifficulty);
 
   const room = `match:${matchId}`;
   io.sockets.sockets.get(sbUser.socketId)?.join(room);
@@ -694,6 +767,7 @@ setInterval(() => {
     // Skip matches with no active turn, at showdown, or with timer cleared/guarded
     if (
       !state.toActId          ||
+      state.toActId === BOT_ID   || // bot acts via its own timer
       state.street === "SHOWDOWN" ||
       state.turnDeadlineMs === 0      ||
       state.turnDeadlineMs === Infinity ||
@@ -755,15 +829,32 @@ io.on("connection", (socket: Socket) => {
     console.log(`[queue:${queueMode}] ${user.username} joined — size: ${q.length}`);
     if (q.length >= 2) {
       const [p1, p2] = q.splice(0, 2);
+      clearQueueTimer(p1.userId);
+      clearQueueTimer(p2.userId);
       createMatch(p1, p2, queueMode).catch((err) =>
         console.error("[match] createMatch error:", err),
       );
+    } else {
+      // No opponent yet — pair with bot after 20 seconds
+      const timer = setTimeout(() => {
+        queueTimers.delete(user.userId);
+        const idx = q.findIndex((u) => u.userId === user.userId);
+        if (idx === -1) return; // already matched or left
+        q.splice(idx, 1);
+        const difficulty = getBotDifficulty(queueMode, user.elo);
+        console.log(`[queue:${queueMode}] ${user.username} timed out — matching with bot (${difficulty})`);
+        createMatch(user, makeBotUser(), "unranked", difficulty).catch((err) =>
+          console.error("[match] bot createMatch error:", err),
+        );
+      }, BOT_QUEUE_TIMEOUT_MS);
+      queueTimers.set(user.userId, timer);
     }
   });
 
   socket.on("queue.leave", () => {
     const user = users.get(socket.id);
     if (!user) return;
+    clearQueueTimer(user.userId);
     for (const m of ["ranked", "unranked"] as Mode[]) {
       const idx = queues[m].findIndex((u) => u.userId === user.userId);
       if (idx !== -1) {
@@ -809,6 +900,7 @@ io.on("connection", (socket: Socket) => {
   socket.on("disconnect", () => {
     const user = users.get(socket.id);
     if (user) {
+      clearQueueTimer(user.userId);
       for (const m of ["ranked", "unranked"] as Mode[]) {
         const idx = queues[m].findIndex((u) => u.userId === user.userId);
         if (idx !== -1) queues[m].splice(idx, 1);
