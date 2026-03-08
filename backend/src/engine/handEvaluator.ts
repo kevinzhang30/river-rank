@@ -9,7 +9,7 @@ const RANK_VALUE: Record<string, number> = {
 
 // ── Hand categories ───────────────────────────────────────────────────────────
 
-type HandCategory =
+export type HandCategory =
   | "HIGH_CARD" | "ONE_PAIR"   | "TWO_PAIR"       | "THREE_OF_A_KIND"
   | "STRAIGHT"  | "FLUSH"      | "FULL_HOUSE"
   | "FOUR_OF_A_KIND"            | "STRAIGHT_FLUSH";
@@ -19,7 +19,7 @@ const CATEGORY_RANK: Record<HandCategory, number> = {
   STRAIGHT: 4,  FLUSH: 5,   FULL_HOUSE: 6, FOUR_OF_A_KIND: 7, STRAIGHT_FLUSH: 8,
 };
 
-interface HandRank {
+export interface HandRank {
   category:    HandCategory;
   tiebreakers: number[];
 }
@@ -91,8 +91,8 @@ function compareHandRanks(a: HandRank, b: HandRank): 1 | -1 | 0 {
   return 0;
 }
 
-/** Best 5-card hand from 2 hole cards + board (must have exactly 5 board cards). */
-function bestHand(holeCards: [Card, Card], board: Card[]): HandRank {
+/** Best 5-card hand from 2 hole cards + up to 5 board cards. */
+export function bestHand(holeCards: [Card, Card], board: Card[]): HandRank {
   const all    = [...holeCards, ...board];
   const combos = combinations5(all.length);
   let best: HandRank | null = null;
