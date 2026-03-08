@@ -260,6 +260,9 @@ export function PokerTable({
                       : `${state.players.find(p => p.userId === activeHandResult.winnerUserId)?.username ?? "?"} WINS $${activeHandResult.pot}`
                     }
                   </span>
+                  <span style={{ color: "var(--text3)", fontSize: 9, letterSpacing: 1, fontVariantNumeric: "tabular-nums" }}>
+                    NEXT HAND IN {Math.max(0, Math.ceil((activeHandResult.showUntilMs - Date.now()) / 1000))}s
+                  </span>
                 </div>
               ) : state.pot > 0 ? (
                 <span>

@@ -312,7 +312,7 @@ function resolveShowdown(state: InternalGameState): void {
       pot:          chopPot,
       deltas:       chopDeltas,
       reason:       "SHOWDOWN",
-      showUntilMs:  Date.now() + 12_000,
+      showUntilMs:  Date.now() + 7_000,
       showdown:     showdownInfo,
       reveals:      {},
     };
@@ -326,7 +326,7 @@ function resolveShowdown(state: InternalGameState): void {
     });
     emitGameState(state);
     state.handNumber++;
-    setTimeout(() => startNextHand(state), 12_000);
+    setTimeout(() => startNextHand(state), 7_000);
   } else {
     // Winner takes pot — show showdown board first, then award
     emitGameState(state);
@@ -549,7 +549,7 @@ function endHand(state: InternalGameState, winnerIndex: 0 | 1, reason: "FOLD" | 
     pot:          winAmount,
     deltas,
     reason,
-    showUntilMs:  Date.now() + 12_000,
+    showUntilMs:  Date.now() + 7_000,
     showdown:     showdownInfo,
     reveals:      {},
   };
@@ -642,7 +642,7 @@ function endHand(state: InternalGameState, winnerIndex: 0 | 1, reason: "FOLD" | 
     console.log(`[blinds] hand #${state.handNumber} → ${state.smallBlind}/${state.bigBlind}`);
   }
 
-  setTimeout(() => startNextHand(state), 12_000);
+  setTimeout(() => startNextHand(state), 7_000);
 }
 
 function startNewHand(state: InternalGameState): void {

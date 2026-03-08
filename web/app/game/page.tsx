@@ -46,6 +46,8 @@ function GameView() {
     ratingDelta:    Record<string, number> | null;
   } | null>(null);
 
+  const [queueStartMs, setQueueStartMs]   = useState<number | null>(null);
+  const [queueTick, setQueueTick]         = useState(0);
   const [liveState, setLiveState]         = useState<PublicGameState | null>(null);
   const [liveHeroCards, setLiveHeroCards] = useState<[string, string] | null>(null);
   const [rawBackendState, setRawBackendState] = useState<BackendGameState | null>(null);
@@ -94,6 +96,7 @@ function GameView() {
             userIdRef.current = res.userId;
             setUserId(res.userId);
             setStatus("in queue…");
+            setQueueStartMs(Date.now());
             socket.emit("queue.join", { mode });
           },
         );
@@ -152,6 +155,13 @@ function GameView() {
 
     return () => { socketRef.current?.disconnect(); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Tick every second while in queue to update countdown
+  useEffect(() => {
+    if (status !== "in queue…") return;
+    const interval = setInterval(() => setQueueTick((t) => t + 1), 1000);
+    return () => clearInterval(interval);
+  }, [status]);
 
   function sendAction(action: string, amount?: number) {
     if (!matchId) return;
@@ -382,11 +392,24 @@ function GameView() {
               flexShrink:   0,
             }}
           />
-          <span style={{ color: "var(--text2)", fontSize: 13 }}>
-            {status === "in queue…"
-              ? `Finding ${mode} opponent…`
-              : status}
-          </span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={{ color: "var(--text2)", fontSize: 13 }}>
+              {status === "in queue…"
+                ? `Finding ${mode} opponent…`
+                : status}
+            </span>
+            {status === "in queue…" && queueStartMs && (() => {
+              const elapsed  = Math.floor((Date.now() - queueStartMs) / 1000);
+              const remaining = Math.max(0, 20 - elapsed);
+              return (
+                <span style={{ color: "var(--text3)", fontSize: 11, fontFamily: "monospace" }}>
+                  {remaining > 0
+                    ? `Bot joins in ${remaining}s`
+                    : "Joining with bot…"}
+                </span>
+              );
+            })()}
+          </div>
         </div>
 
         <button
