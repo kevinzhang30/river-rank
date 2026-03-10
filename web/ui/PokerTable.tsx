@@ -127,7 +127,7 @@ export function PokerTable({
           flexShrink:     0,
         }}
       >
-        <span style={{ fontWeight: 800, letterSpacing: 2, fontSize: 12, color: "var(--text)" }}>
+        <span className="wordmark" style={{ fontWeight: 800, fontSize: 12, color: "var(--text)" }}>
           RiverRank ♠
         </span>
 

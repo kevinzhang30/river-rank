@@ -57,6 +57,13 @@ input[type="number"] {
   -moz-appearance: textfield;
 }
 
+/* ── Wordmark ─────────────────────────────────────────────────────────────── */
+
+.wordmark {
+  font-family: monospace;
+  letter-spacing: 3px;
+}
+
 /* ── Suit colors ──────────────────────────────────────────────────────────── */
 
 :root,
