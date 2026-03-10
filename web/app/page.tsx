@@ -458,7 +458,7 @@ function ChooseUsernameView({
     >
       <div style={{ textAlign: "center" }}>
         <div style={{ fontSize: 40, lineHeight: 1, marginBottom: 8, color: "var(--text)" }}>♠</div>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: 3, color: "var(--text)" }}>
+        <h1 className="wordmark" style={{ margin: 0, fontSize: 22, fontWeight: 800, color: "var(--text)" }}>
           RiverRank
         </h1>
       </div>
@@ -578,7 +578,7 @@ function AuthView({
     >
       <div style={{ textAlign: "center" }}>
         <div style={{ fontSize: 40, lineHeight: 1, marginBottom: 8, color: "var(--text)" }}>♠</div>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: 3, color: "var(--text)" }}>
+        <h1 className="wordmark" style={{ margin: 0, fontSize: 22, fontWeight: 800, color: "var(--text)" }}>
           RiverRank
         </h1>
         <p style={{ margin: "0.5rem 0 0", color: "var(--text3)", fontSize: 12, letterSpacing: 1 }}>
@@ -842,7 +842,7 @@ export default function Page() {
           zIndex:         10,
         }}
       >
-        <span style={{ fontWeight: 800, letterSpacing: 3, fontSize: 13 }}>RiverRank ♠</span>
+        <span className="wordmark" style={{ fontWeight: 800, fontSize: 13 }}>RiverRank ♠</span>
         <span style={{ color: "var(--text3)", fontSize: 12 }}>
           {profile?.username ?? ""}
         </span>
