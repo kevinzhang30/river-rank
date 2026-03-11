@@ -408,24 +408,27 @@ function ChooseUsernameView({
   onDone,
 }: {
   userId: string;
-  onDone: (username: string) => void;
+  onDone: (username: string, elo: number) => void;
 }) {
   const [value, setValue]         = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [level, setLevel]         = useState<"beginner" | "intermediate" | null>(null);
 
   const trimmed   = value.trim();
   const hint      = usernameHint(value);
-  const isValid   = USERNAME_RE.test(trimmed);
+  const isValid   = USERNAME_RE.test(trimmed) && level !== null;
 
   async function submit() {
     if (!isValid || submitting) return;
     setSubmitting(true);
     setSubmitError(null);
 
+    const elo = level === "beginner" ? 600 : 1200;
+
     const { error } = await supabase
       .from("profiles")
-      .update({ username: trimmed })
+      .update({ username: trimmed, elo })
       .eq("id", userId);
 
     setSubmitting(false);
@@ -438,7 +441,7 @@ function ChooseUsernameView({
         setSubmitError(error.message);
       }
     } else {
-      onDone(trimmed);
+      onDone(trimmed, elo);
     }
   }
 
@@ -482,6 +485,38 @@ function ChooseUsernameView({
           <div style={{ fontSize: 12, color: "var(--text3)" }}>
             This will be visible on the leaderboard.
           </div>
+        </div>
+
+        {/* Skill level */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+          <div style={{ fontSize: 12, color: "var(--text3)" }}>Skill level</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {(["beginner", "intermediate"] as const).map((lvl) => (
+              <button
+                key={lvl}
+                onClick={() => setLevel(lvl)}
+                style={{
+                  background:   level === lvl ? "var(--primaryBtn)" : "var(--surface2)",
+                  color:        level === lvl ? "var(--primaryBtnText)" : "var(--text2)",
+                  border:       `1px solid ${level === lvl ? "transparent" : "var(--border)"}`,
+                  borderRadius: 4,
+                  padding:      "0.55rem 0",
+                  fontSize:     12,
+                  fontFamily:   "monospace",
+                  fontWeight:   level === lvl ? 700 : 400,
+                  cursor:       "pointer",
+                  letterSpacing: 0.3,
+                }}
+              >
+                {lvl === "beginner" ? "Beginner" : "Intermediate"}
+              </button>
+            ))}
+          </div>
+          {level && (
+            <div style={{ fontSize: 11, color: "var(--text3)" }}>
+              Starting ELO: {level === "beginner" ? 600 : 1200}
+            </div>
+          )}
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
@@ -831,7 +866,7 @@ export default function Page() {
     return (
       <ChooseUsernameView
         userId={session.user.id}
-        onDone={(username) => setProfile((p) => p ? { ...p, username } : p)}
+        onDone={(username, elo) => setProfile((p) => p ? { ...p, username, elo } : p)} 
       />
     );
   }
