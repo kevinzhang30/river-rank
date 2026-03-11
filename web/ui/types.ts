@@ -72,4 +72,5 @@ export interface LeaderboardEntry {
   gamesPlayed: number;
   wins:        number;
   losses:      number;
+  country:     string | null;
 }
