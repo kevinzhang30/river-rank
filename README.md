@@ -2,6 +2,8 @@
 
 # RiverRank
 
+riverank.io
+
 RiverRank is a real-time multiplayer heads-up poker platform featuring ranked Elo matchmaking, server-authoritative game logic, and authenticated user accounts.
 
 The application is designed as a production-style system demonstrating real-time communication, distributed state management, and secure backend validation.
