@@ -72,4 +72,12 @@ The system is built with production principles in mind:
 
 ## Status
 
-Active development. Designed as a long-term platform project.
+Active development. Designed as a long-term platform project. Version 1 release is underway.
+
+---
+
+## Stretch Goals
+
+- Mobile App support
+- User count
+- Paid cosmetics and battle pass subscription paywall for advanced features
