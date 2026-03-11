@@ -1,5 +1,7 @@
 "use client";
 
+import { useIsMobile } from "@/lib/useIsMobile";
+
 const HANDS = [
   { name: "Straight Flush",  desc: "Five same-suit cards in sequence" },
   { name: "Four of a Kind",  desc: "Four cards of the same rank" },
@@ -13,6 +15,7 @@ const HANDS = [
 ];
 
 export function HandCheatSheet({ onClose }: { onClose: () => void }) {
+  const isMobile = useIsMobile();
   return (
     <div
       style={{
@@ -31,8 +34,10 @@ export function HandCheatSheet({ onClose }: { onClose: () => void }) {
           background:    "var(--surface)",
           border:        "1px solid var(--border)",
           borderRadius:  8,
-          padding:       "24px 32px",
-          minWidth:      360,
+          padding:       isMobile ? "20px 18px" : "24px 32px",
+          minWidth:      isMobile ? undefined : 360,
+          width:         isMobile ? "90vw" : undefined,
+          maxWidth:      isMobile ? 360 : undefined,
           position:      "relative",
           fontFamily:    "monospace",
         }}

@@ -7,6 +7,7 @@ import { io, Socket } from "socket.io-client";
 import { supabase } from "@/lib/supabaseClient";
 import { ThemeToggle } from "@/ui/ThemeToggle";
 import { DeckToggle } from "@/ui/DeckToggle";
+import { useIsMobile } from "@/lib/useIsMobile";
 import type { LeaderboardEntry, Mode } from "@/ui/types";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4000";
@@ -1177,6 +1178,7 @@ function AuthView({
 function PageInner() {
   const router       = useRouter();
   const searchParams = useSearchParams();
+  const isMobile     = useIsMobile();
 
   const [session, setSession]             = useState<Session | null>(null);
   const [profile, setProfile]             = useState<Profile | null>(null);
@@ -1674,14 +1676,14 @@ function PageInner() {
         style={{
           maxWidth: 1100,
           margin:   "0 auto",
-          padding:  "2rem 1.5rem",
+          padding:  isMobile ? "1rem" : "2rem 1.5rem",
         }}
       >
         {/* Two-column grid */}
         <div
           style={{
             display:             "grid",
-            gridTemplateColumns: "340px 1fr",
+            gridTemplateColumns: isMobile ? "1fr" : "340px 1fr",
             gap:                 "1.25rem",
             alignItems:          "start",
           }}

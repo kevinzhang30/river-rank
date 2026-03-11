@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { PokerTable } from "@/ui/PokerTable";
 import { DebugPanel } from "@/ui/DebugPanel";
 import { mockState, mockHeroHoleCards } from "@/ui/mockState";
+import { useIsMobile } from "@/lib/useIsMobile";
 import {
   adaptBackendState,
   isBackendGameState,
@@ -27,6 +28,7 @@ function GameView() {
   const router       = useRouter();
   const searchParams = useSearchParams();
   const mode         = (searchParams.get("mode") ?? "ranked") as Mode;
+  const isMobile     = useIsMobile();
 
   const socketRef  = useRef<Socket | null>(null);
   const userIdRef  = useRef<string | null>(null);
@@ -292,7 +294,7 @@ function GameView() {
                 background:    "var(--surface)",
                 border:        `1px solid ${isWinner ? "var(--success)" : "var(--danger)"}`,
                 borderRadius:  8,
-                padding:       "2.5rem 3rem",
+                padding:       isMobile ? "1.5rem 1.25rem" : "2.5rem 3rem",
                 textAlign:     "center",
                 fontFamily:    "monospace",
                 display:       "flex",
@@ -391,8 +393,9 @@ function GameView() {
           background:    "var(--surface)",
           border:        "1px solid var(--border)",
           borderRadius:  8,
-          padding:       "2rem",
-          width:         300,
+          padding:       isMobile ? "1.5rem" : "2rem",
+          width:         isMobile ? "90vw" : 300,
+          maxWidth:      isMobile ? 300 : undefined,
           display:       "flex",
           flexDirection: "column",
           alignItems:    "center",

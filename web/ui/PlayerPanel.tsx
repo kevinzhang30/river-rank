@@ -2,6 +2,7 @@
 
 import type { PublicPlayer, HandResult } from "./types";
 import { Card, FacedownCard } from "./Card";
+import { useIsMobile } from "@/lib/useIsMobile";
 
 function DealerChip() {
   return (
@@ -38,6 +39,7 @@ interface Props {
 }
 
 export function PlayerPanel({ player, isHero, holeCards, handResult, turnDeadlineMs, revealedCards, handCategory }: Props) {
+  const isMobile = useIsMobile();
   const active = player.isToAct && !player.folded;
 
   const isWinner = !!handResult && handResult.winnerUserId === player.userId;
@@ -79,12 +81,12 @@ export function PlayerPanel({ player, isHero, holeCards, handResult, turnDeadlin
         background:    bgColor,
         borderRadius:  4,
         border:        `${borderWidth}px solid ${borderColor}`,
-        padding:       "14px 22px",
+        padding:       isMobile ? "10px 14px" : "14px 22px",
         display:       "flex",
         flexDirection: "column",
         alignItems:    "center",
-        gap:           8,
-        minWidth:      220,
+        gap:           isMobile ? 4 : 8,
+        minWidth:      isMobile ? 0 : 220,
         opacity,
         transition:    "border-color 0.15s, opacity 0.15s, background 0.15s",
       }}
@@ -212,7 +214,7 @@ export function PlayerPanel({ player, isHero, holeCards, handResult, turnDeadlin
         display:       "flex",
         flexDirection: "column",
         alignItems:    "center",
-        gap:           10,
+        gap:           isMobile ? 6 : 10,
       }}
     >
       {!isHero && cards}
