@@ -471,6 +471,7 @@ function FriendsCard({
   pendingChallenge,
   onAcceptChallenge,
   onDeclineChallenge,
+  onCancelChallenge,
   challengeWaiting,
 }: {
   friends:            Friend[];
@@ -479,7 +480,8 @@ function FriendsCard({
   pendingChallenge:   IncomingChallenge | null;
   onAcceptChallenge:  () => void;
   onDeclineChallenge: () => void;
-  challengeWaiting:   string | null; // friendId we're waiting on
+  onCancelChallenge:  () => void;
+  challengeWaiting:   { friendId: string; challengeId: string } | null;
 }) {
   const [showLink, setShowLink] = useState(false);
   const [copied, setCopied]     = useState(false);
@@ -612,7 +614,7 @@ function FriendsCard({
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", maxHeight: 300, overflowY: "auto" }}>
           {friends.map((f) => {
-            const isWaiting = challengeWaiting === f.id;
+            const isWaiting = challengeWaiting?.friendId === f.id;
             const flag = f.country && COUNTRY_MAP[f.country] ? COUNTRY_MAP[f.country].flag + " " : "";
 
             return (
@@ -642,7 +644,26 @@ function FriendsCard({
                 </span>
                 {/* Challenge buttons */}
                 {isWaiting ? (
-                  <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600, whiteSpace: "nowrap" }}>Waiting...</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600, whiteSpace: "nowrap" }}>Waiting...</span>
+                    <button
+                      onClick={onCancelChallenge}
+                      style={{
+                        background:   "transparent",
+                        color:        "var(--text3)",
+                        border:       "1px solid var(--border)",
+                        borderRadius: 4,
+                        padding:      "0.2rem 0.45rem",
+                        fontSize:     10,
+                        fontFamily:   "monospace",
+                        fontWeight:   700,
+                        cursor:       "pointer",
+                        whiteSpace:   "nowrap",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 ) : (
                   <div style={{ display: "flex", gap: 4 }}>
                     <button
@@ -1181,7 +1202,7 @@ function PageInner() {
   const [friends, setFriends]                   = useState<Friend[]>([]);
   const [friendCode, setFriendCode]             = useState<string | null>(null);
   const [pendingChallenge, setPendingChallenge] = useState<IncomingChallenge | null>(null);
-  const [challengeWaiting, setChallengeWaiting] = useState<string | null>(null); // friendId while waiting
+  const [challengeWaiting, setChallengeWaiting] = useState<{ friendId: string; challengeId: string } | null>(null);
   const [friendToast, setFriendToast]           = useState<string | null>(null);
   const dashboardSocketRef = useRef<Socket | null>(null);
 
@@ -1383,7 +1404,7 @@ function PageInner() {
       { toUserId: friendId, mode },
       (res: { challengeId?: string; error?: string }) => {
         if (res.challengeId) {
-          setChallengeWaiting(friendId);
+          setChallengeWaiting({ friendId, challengeId: res.challengeId });
         }
       },
     );
@@ -1394,6 +1415,13 @@ function PageInner() {
     if (!socket?.connected || !pendingChallenge) return;
     socket.emit("challenge.accept", { challengeId: pendingChallenge.challengeId });
     supabase.from("pending_challenges").delete().eq("id", pendingChallenge.challengeId);
+  }
+
+  function handleCancelChallenge() {
+    const socket = dashboardSocketRef.current;
+    if (!challengeWaiting) return;
+    if (socket?.connected) socket.emit("challenge.cancel", { challengeId: challengeWaiting.challengeId });
+    setChallengeWaiting(null);
   }
 
   function handleDeclineChallenge() {
@@ -1684,6 +1712,7 @@ function PageInner() {
               pendingChallenge={pendingChallenge}
               onAcceptChallenge={handleAcceptChallenge}
               onDeclineChallenge={handleDeclineChallenge}
+              onCancelChallenge={handleCancelChallenge}
               challengeWaiting={challengeWaiting}
             />
           </div>
