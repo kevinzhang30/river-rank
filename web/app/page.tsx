@@ -274,7 +274,7 @@ function LeaderboardCard({ entries }: { entries: LeaderboardEntry[] }) {
                   {i + 1}
                 </td>
                 <td style={{ color: "var(--text)", fontSize: 13, fontWeight: 600, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {e.username}
+                  {e.country && COUNTRY_MAP[e.country] ? `${COUNTRY_MAP[e.country].flag} ` : ""}{e.username}
                 </td>
                 <td style={{ color: "#F59E0B", fontSize: 13, fontWeight: 700, textAlign: "right" }}>
                   {e.elo}
@@ -390,6 +390,80 @@ function RecentMatchesCard({ matches }: { matches: RecentMatch[] }) {
 
 // ── Choose username view ──────────────────────────────────────────────────────
 
+const COUNTRIES: { code: string; flag: string; name: string }[] = [
+  { code: "AF", flag: "🇦🇫", name: "Afghanistan" },
+  { code: "AL", flag: "🇦🇱", name: "Albania" },
+  { code: "DZ", flag: "🇩🇿", name: "Algeria" },
+  { code: "AR", flag: "🇦🇷", name: "Argentina" },
+  { code: "AU", flag: "🇦🇺", name: "Australia" },
+  { code: "AT", flag: "🇦🇹", name: "Austria" },
+  { code: "BD", flag: "🇧🇩", name: "Bangladesh" },
+  { code: "BE", flag: "🇧🇪", name: "Belgium" },
+  { code: "BR", flag: "🇧🇷", name: "Brazil" },
+  { code: "BG", flag: "🇧🇬", name: "Bulgaria" },
+  { code: "CA", flag: "🇨🇦", name: "Canada" },
+  { code: "CL", flag: "🇨🇱", name: "Chile" },
+  { code: "CN", flag: "🇨🇳", name: "China" },
+  { code: "CO", flag: "🇨🇴", name: "Colombia" },
+  { code: "HR", flag: "🇭🇷", name: "Croatia" },
+  { code: "CZ", flag: "🇨🇿", name: "Czechia" },
+  { code: "DK", flag: "🇩🇰", name: "Denmark" },
+  { code: "EG", flag: "🇪🇬", name: "Egypt" },
+  { code: "EE", flag: "🇪🇪", name: "Estonia" },
+  { code: "FI", flag: "🇫🇮", name: "Finland" },
+  { code: "FR", flag: "🇫🇷", name: "France" },
+  { code: "DE", flag: "🇩🇪", name: "Germany" },
+  { code: "GR", flag: "🇬🇷", name: "Greece" },
+  { code: "HK", flag: "🇭🇰", name: "Hong Kong" },
+  { code: "HU", flag: "🇭🇺", name: "Hungary" },
+  { code: "IS", flag: "🇮🇸", name: "Iceland" },
+  { code: "IN", flag: "🇮🇳", name: "India" },
+  { code: "ID", flag: "🇮🇩", name: "Indonesia" },
+  { code: "IR", flag: "🇮🇷", name: "Iran" },
+  { code: "IQ", flag: "🇮🇶", name: "Iraq" },
+  { code: "IE", flag: "🇮🇪", name: "Ireland" },
+  { code: "IL", flag: "🇮🇱", name: "Israel" },
+  { code: "IT", flag: "🇮🇹", name: "Italy" },
+  { code: "JP", flag: "🇯🇵", name: "Japan" },
+  { code: "KZ", flag: "🇰🇿", name: "Kazakhstan" },
+  { code: "KE", flag: "🇰🇪", name: "Kenya" },
+  { code: "KR", flag: "🇰🇷", name: "South Korea" },
+  { code: "LV", flag: "🇱🇻", name: "Latvia" },
+  { code: "LT", flag: "🇱🇹", name: "Lithuania" },
+  { code: "MY", flag: "🇲🇾", name: "Malaysia" },
+  { code: "MX", flag: "🇲🇽", name: "Mexico" },
+  { code: "MA", flag: "🇲🇦", name: "Morocco" },
+  { code: "NL", flag: "🇳🇱", name: "Netherlands" },
+  { code: "NZ", flag: "🇳🇿", name: "New Zealand" },
+  { code: "NG", flag: "🇳🇬", name: "Nigeria" },
+  { code: "NO", flag: "🇳🇴", name: "Norway" },
+  { code: "PK", flag: "🇵🇰", name: "Pakistan" },
+  { code: "PE", flag: "🇵🇪", name: "Peru" },
+  { code: "PH", flag: "🇵🇭", name: "Philippines" },
+  { code: "PL", flag: "🇵🇱", name: "Poland" },
+  { code: "PT", flag: "🇵🇹", name: "Portugal" },
+  { code: "RO", flag: "🇷🇴", name: "Romania" },
+  { code: "RU", flag: "🇷🇺", name: "Russia" },
+  { code: "SA", flag: "🇸🇦", name: "Saudi Arabia" },
+  { code: "RS", flag: "🇷🇸", name: "Serbia" },
+  { code: "SG", flag: "🇸🇬", name: "Singapore" },
+  { code: "SK", flag: "🇸🇰", name: "Slovakia" },
+  { code: "ZA", flag: "🇿🇦", name: "South Africa" },
+  { code: "ES", flag: "🇪🇸", name: "Spain" },
+  { code: "SE", flag: "🇸🇪", name: "Sweden" },
+  { code: "CH", flag: "🇨🇭", name: "Switzerland" },
+  { code: "TW", flag: "🇹🇼", name: "Taiwan" },
+  { code: "TH", flag: "🇹🇭", name: "Thailand" },
+  { code: "TR", flag: "🇹🇷", name: "Turkey" },
+  { code: "UA", flag: "🇺🇦", name: "Ukraine" },
+  { code: "AE", flag: "🇦🇪", name: "UAE" },
+  { code: "GB", flag: "🇬🇧", name: "United Kingdom" },
+  { code: "US", flag: "🇺🇸", name: "United States" },
+  { code: "VN", flag: "🇻🇳", name: "Vietnam" },
+];
+
+const COUNTRY_MAP = Object.fromEntries(COUNTRIES.map((c) => [c.code, c]));
+
 const USERNAME_RE = /^[a-zA-Z0-9_]{3,16}$/;
 
 function usernameHint(value: string): string | null {
@@ -412,10 +486,29 @@ function ChooseUsernameView({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [level, setLevel]         = useState<"beginner" | "intermediate" | null>(null);
+  const [country, setCountry]     = useState("");
+  const [taken, setTaken]         = useState(false);
+  const [checking, setChecking]   = useState(false);
 
   const trimmed   = value.trim();
   const hint      = usernameHint(value);
-  const isValid   = USERNAME_RE.test(trimmed) && level !== null;
+  const isValid   = USERNAME_RE.test(trimmed) && level !== null && country !== "" && !taken && !checking;
+
+  // Debounced username availability check
+  useEffect(() => {
+    if (!USERNAME_RE.test(trimmed)) { setTaken(false); return; }
+    setChecking(true);
+    const timer = setTimeout(async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("username")
+        .eq("username", trimmed)
+        .maybeSingle();
+      setTaken(!!data);
+      setChecking(false);
+    }, 400);
+    return () => { clearTimeout(timer); setChecking(false); };
+  }, [trimmed]);
 
   async function submit() {
     if (!isValid || submitting) return;
@@ -426,7 +519,7 @@ function ChooseUsernameView({
 
     const { error } = await supabase
       .from("profiles")
-      .update({ username: trimmed, elo })
+      .update({ username: trimmed, elo, country })
       .eq("id", userId);
 
     setSubmitting(false);
@@ -517,6 +610,35 @@ function ChooseUsernameView({
           )}
         </div>
 
+        {/* Country */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+          <div style={{ fontSize: 12, color: "var(--text3)" }}>Country</div>
+          <select
+            value={country}
+            onChange={(e) => setCountry(e.target.value)}
+            style={{
+              background:   "var(--surface2)",
+              border:       "1px solid var(--border)",
+              borderRadius: 4,
+              color:        country ? "var(--text)" : "var(--text3)",
+              padding:      "0.6rem 0.9rem",
+              fontSize:     "0.9rem",
+              fontFamily:   "monospace",
+              outline:      "none",
+              width:        "100%",
+              boxSizing:    "border-box",
+              cursor:       "pointer",
+            }}
+          >
+            <option value="" disabled>Select your country</option>
+            {COUNTRIES.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.flag} {c.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
           <input
             value={value}
@@ -542,9 +664,9 @@ function ChooseUsernameView({
           />
 
           {/* Inline validation hint */}
-          {(hint || submitError) && (
+          {(hint || submitError || taken) && (
             <p style={{ margin: 0, fontSize: 12, color: "var(--danger)" }}>
-              {submitError ?? hint}
+              {submitError ?? hint ?? "That username is already taken."}
             </p>
           )}
 
@@ -581,11 +703,11 @@ function ChooseUsernameView({
 // ── Auth view ─────────────────────────────────────────────────────────────────
 
 function AuthView({
-  email, setEmail, password, setPassword,
+  identifier, setIdentifier, password, setPassword,
   mode, onToggleMode, submitting, errorMsg, onSubmit,
 }: {
-  email:          string;
-  setEmail:       (v: string) => void;
+  identifier:     string;
+  setIdentifier:  (v: string) => void;
   password:       string;
   setPassword:    (v: string) => void;
   mode:           "signin" | "signup";
@@ -594,7 +716,7 @@ function AuthView({
   errorMsg:       string | null;
   onSubmit:       () => void;
 }) {
-  const disabled = submitting || !email.trim() || password.length < 6;
+  const disabled = submitting || !identifier.trim() || password.length < 6;
 
   return (
     <div
@@ -636,11 +758,11 @@ function AuthView({
         </p>
 
         <input
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          type={mode === "signin" ? "text" : "email"}
+          value={identifier}
+          onChange={(e) => setIdentifier(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && onSubmit()}
-          placeholder="you@example.com"
+          placeholder={mode === "signin" ? "email or username" : "you@example.com"}
           autoFocus
           style={{
             background:   "var(--surface2)",
@@ -730,7 +852,7 @@ export default function Page() {
   const [profileLoading, setProfileLoading] = useState(true);
   const [authChecked, setAuthChecked]     = useState(false);
 
-  const [email, setEmail]                 = useState("");
+  const [identifier, setIdentifier]       = useState("");
   const [password, setPassword]           = useState("");
   const [authMode, setAuthMode]           = useState<"signin" | "signup">("signin");
   const [submitting, setSubmitting]       = useState(false);
@@ -829,7 +951,7 @@ export default function Page() {
     if (!session) return;
     supabase
       .from("profiles")
-      .select("id, username, elo, wins, losses")
+      .select("id, username, elo, wins, losses, country")
       .not("username", "is", null)
       .order("elo", { ascending: false })
       .limit(10)
@@ -844,30 +966,53 @@ export default function Page() {
             wins: row.wins,
             losses: row.losses,
             gamesPlayed: row.wins + row.losses,
+            country: row.country ?? null,
           }))
         );
       });
   }, [session]);
 
   async function submitAuth() {
-    if (!email.trim() || password.length < 6) return;
+    const trimmed = identifier.trim();
+    if (!trimmed || password.length < 6) return;
     setSubmitting(true);
     setErrorMsg(null);
 
-    if (authMode === "signin") {
-      const { error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
-      if (error) setErrorMsg(error.message);
-    } else {
+    if (authMode === "signup") {
       const { error } = await supabase.auth.signUp({
-        email: email.trim(),
+        email: trimmed,
         password,
       });
       if (error) setErrorMsg(error.message);
+      setSubmitting(false);
+      return;
     }
 
+    // Sign-in: detect email vs username
+    let emailToUse = trimmed;
+
+    if (!trimmed.includes("@")) {
+      const { data, error } = await supabase.rpc("get_email_by_username", {
+        p_username: trimmed,
+      });
+      if (error) {
+        setErrorMsg("Something went wrong. Please try again.");
+        setSubmitting(false);
+        return;
+      }
+      if (!data) {
+        setErrorMsg("No account found for that username.");
+        setSubmitting(false);
+        return;
+      }
+      emailToUse = data as string;
+    }
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email: emailToUse,
+      password,
+    });
+    if (error) setErrorMsg(error.message);
     setSubmitting(false);
   }
 
@@ -885,8 +1030,8 @@ export default function Page() {
   if (!session) {
     return (
       <AuthView
-        email={email}
-        setEmail={setEmail}
+        identifier={identifier}
+        setIdentifier={setIdentifier}
         password={password}
         setPassword={setPassword}
         mode={authMode}
