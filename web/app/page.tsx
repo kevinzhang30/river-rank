@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { Session } from "@supabase/supabase-js";
+import { io, Socket } from "socket.io-client";
 import { supabase } from "@/lib/supabaseClient";
 import { ThemeToggle } from "@/ui/ThemeToggle";
 import { DeckToggle } from "@/ui/DeckToggle";
 import type { LeaderboardEntry, Mode } from "@/ui/types";
+
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4000";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -25,6 +28,22 @@ interface RecentMatch {
   result:      "WIN" | "LOSS" | "DRAW";
   mode:        "ranked" | "unranked";
   ratingDelta: number | null; // null for unranked
+}
+
+interface Friend {
+  id:       string;
+  username: string;
+  country:  string | null;
+  elo:      number;
+  wins:     number;
+  losses:   number;
+}
+
+interface IncomingChallenge {
+  challengeId:  string;
+  fromUsername:  string;
+  fromUserId:   string;
+  mode:         Mode;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -437,6 +456,270 @@ function RecentMatchesCard({ matches }: { matches: RecentMatch[] }) {
               </span>
             </div>
           ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ── Friends card ─────────────────────────────────────────────────────────────
+
+function FriendsCard({
+  friends,
+  friendCode,
+  onlineUserIds,
+  onChallenge,
+  pendingChallenge,
+  onAcceptChallenge,
+  onDeclineChallenge,
+  challengeWaiting,
+}: {
+  friends:            Friend[];
+  friendCode:         string | null;
+  onlineUserIds:      Set<string>;
+  onChallenge:        (friendId: string, mode: Mode) => void;
+  pendingChallenge:   IncomingChallenge | null;
+  onAcceptChallenge:  () => void;
+  onDeclineChallenge: () => void;
+  challengeWaiting:   string | null; // friendId we're waiting on
+}) {
+  const [showLink, setShowLink] = useState(false);
+  const [copied, setCopied]     = useState(false);
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+
+  const link = friendCode ? `riverrank.io/?friend=${friendCode}` : "";
+
+  function copyLink() {
+    navigator.clipboard.writeText(link);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <Card>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem" }}>
+        <CardLabel style={{ marginBottom: 0 }}>Friends</CardLabel>
+        <button
+          onClick={() => setShowLink((s) => !s)}
+          style={{
+            background:    "var(--primaryBtn)",
+            color:         "var(--primaryBtnText)",
+            border:        "none",
+            borderRadius:  4,
+            padding:       "0.35rem 0.65rem",
+            fontSize:      10,
+            fontFamily:    "monospace",
+            fontWeight:    700,
+            cursor:        "pointer",
+            letterSpacing: 0.3,
+          }}
+        >
+          {showLink ? "Hide Link" : "Add Friend"}
+        </button>
+      </div>
+
+      {/* Share link */}
+      {showLink && friendCode && (
+        <div
+          style={{
+            display:      "flex",
+            alignItems:   "center",
+            gap:          8,
+            padding:      "0.6rem 0.75rem",
+            background:   "var(--surface2)",
+            borderRadius: 4,
+            border:       "1px solid var(--border)",
+            marginBottom: "0.75rem",
+          }}
+        >
+          <span style={{ fontSize: 11, color: "var(--text2)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {link}
+          </span>
+          <button
+            onClick={copyLink}
+            style={{
+              background:   "transparent",
+              color:        copied ? "var(--success)" : "var(--primaryBtn)",
+              border:       `1px solid ${copied ? "var(--success)" : "var(--primaryBtn)"}`,
+              borderRadius: 4,
+              padding:      "0.25rem 0.5rem",
+              fontSize:     10,
+              fontFamily:   "monospace",
+              fontWeight:   700,
+              cursor:       "pointer",
+              whiteSpace:   "nowrap",
+            }}
+          >
+            {copied ? "Copied!" : "Copy"}
+          </button>
+        </div>
+      )}
+
+      {/* Incoming challenge banner */}
+      {pendingChallenge && (
+        <div
+          style={{
+            display:      "flex",
+            alignItems:   "center",
+            gap:          8,
+            padding:      "0.6rem 0.75rem",
+            background:   "var(--surface2)",
+            borderRadius: 4,
+            border:       "1px solid var(--primaryBtn)",
+            marginBottom: "0.75rem",
+          }}
+        >
+          <span style={{ fontSize: 12, color: "var(--text)", flex: 1 }}>
+            <strong>{pendingChallenge.fromUsername}</strong> challenges you to {pendingChallenge.mode}!
+          </span>
+          <button
+            onClick={onAcceptChallenge}
+            style={{
+              background:   "var(--primaryBtn)",
+              color:        "var(--primaryBtnText)",
+              border:       "none",
+              borderRadius: 4,
+              padding:      "0.3rem 0.6rem",
+              fontSize:     10,
+              fontFamily:   "monospace",
+              fontWeight:   700,
+              cursor:       "pointer",
+            }}
+          >
+            Accept
+          </button>
+          <button
+            onClick={onDeclineChallenge}
+            style={{
+              background:   "transparent",
+              color:        "var(--text3)",
+              border:       "1px solid var(--border)",
+              borderRadius: 4,
+              padding:      "0.3rem 0.6rem",
+              fontSize:     10,
+              fontFamily:   "monospace",
+              fontWeight:   700,
+              cursor:       "pointer",
+            }}
+          >
+            Decline
+          </button>
+        </div>
+      )}
+
+      {/* Friends list */}
+      {friends.length === 0 ? (
+        <div style={{ color: "var(--text3)", fontSize: 12, textAlign: "center", padding: "1rem 0" }}>
+          No friends yet — share your link to add friends!
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", maxHeight: 300, overflowY: "auto" }}>
+          {friends.map((f) => {
+            const isOnline    = onlineUserIds.has(f.id);
+            const isWaiting   = challengeWaiting === f.id;
+            const dropdownOpen = openDropdown === f.id;
+            const flag = f.country && COUNTRY_MAP[f.country] ? COUNTRY_MAP[f.country].flag + " " : "";
+
+            return (
+              <div
+                key={f.id}
+                style={{
+                  display:      "flex",
+                  alignItems:   "center",
+                  gap:          8,
+                  padding:      "0.5rem 0.6rem",
+                  background:   "var(--surface2)",
+                  borderRadius: 4,
+                  border:       "1px solid var(--border)",
+                }}
+              >
+                {/* Online dot */}
+                <span
+                  style={{
+                    width:        6,
+                    height:       6,
+                    borderRadius: "50%",
+                    background:   isOnline ? "var(--success)" : "var(--text3)",
+                    opacity:      isOnline ? 1 : 0.4,
+                    flexShrink:   0,
+                  }}
+                />
+                {/* Name */}
+                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {flag}{f.username}
+                </span>
+                {/* Elo */}
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#F59E0B", minWidth: 32, textAlign: "right" }}>
+                  {f.elo}
+                </span>
+                {/* W-L */}
+                <span style={{ fontSize: 10, color: "var(--text3)", minWidth: 36, textAlign: "right" }}>
+                  {f.wins}-{f.losses}
+                </span>
+                {/* Challenge button */}
+                <div style={{ position: "relative" }}>
+                  {isWaiting ? (
+                    <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600 }}>Waiting...</span>
+                  ) : (
+                    <button
+                      onClick={() => setOpenDropdown(dropdownOpen ? null : f.id)}
+                      style={{
+                        background:   "transparent",
+                        color:        "var(--primaryBtn)",
+                        border:       "1px solid var(--primaryBtn)",
+                        borderRadius: 4,
+                        padding:      "0.2rem 0.45rem",
+                        fontSize:     10,
+                        fontFamily:   "monospace",
+                        fontWeight:   700,
+                        cursor:       "pointer",
+                        whiteSpace:   "nowrap",
+                      }}
+                    >
+                      Challenge
+                    </button>
+                  )}
+                  {dropdownOpen && (
+                    <div
+                      style={{
+                        position:     "absolute",
+                        top:          "calc(100% + 4px)",
+                        right:        0,
+                        background:   "var(--surface)",
+                        border:       "1px solid var(--border)",
+                        borderRadius: 4,
+                        zIndex:       50,
+                        overflow:     "hidden",
+                        minWidth:     100,
+                      }}
+                    >
+                      {(["ranked", "unranked"] as Mode[]).map((m) => (
+                        <button
+                          key={m}
+                          onClick={() => { onChallenge(f.id, m); setOpenDropdown(null); }}
+                          style={{
+                            display:     "block",
+                            width:       "100%",
+                            background:  "transparent",
+                            border:      "none",
+                            borderBottom: m === "ranked" ? "1px solid var(--border)" : "none",
+                            color:       "var(--text2)",
+                            fontSize:    11,
+                            fontFamily:  "monospace",
+                            padding:     "8px 12px",
+                            textAlign:   "left",
+                            cursor:      "pointer",
+                          }}
+                        >
+                          {m === "ranked" ? "Ranked" : "Unranked"}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </Card>
@@ -906,8 +1189,9 @@ function AuthView({
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export default function Page() {
-  const router = useRouter();
+function PageInner() {
+  const router       = useRouter();
+  const searchParams = useSearchParams();
 
   const [session, setSession]             = useState<Session | null>(null);
   const [profile, setProfile]             = useState<Profile | null>(null);
@@ -928,6 +1212,15 @@ export default function Page() {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef     = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
+
+  // Friends state
+  const [friends, setFriends]                   = useState<Friend[]>([]);
+  const [friendCode, setFriendCode]             = useState<string | null>(null);
+  const [onlineUserIds, setOnlineUserIds]       = useState<Set<string>>(new Set());
+  const [pendingChallenge, setPendingChallenge] = useState<IncomingChallenge | null>(null);
+  const [challengeWaiting, setChallengeWaiting] = useState<string | null>(null); // friendId while waiting
+  const [friendToast, setFriendToast]           = useState<string | null>(null);
+  const dashboardSocketRef = useRef<Socket | null>(null);
 
   // Session
   useEffect(() => {
@@ -954,18 +1247,30 @@ export default function Page() {
 
     supabase
       .from("profiles")
-      .select("username, elo, wins, losses, country")
+      .select("username, elo, wins, losses, country, friend_code")
       .eq("id", session.user.id)
       .maybeSingle()
-      .then(async ({ data }) => {
-        if (!data) {
+      .then(async ({ data, error }) => {
+        // If friend_code column doesn't exist yet, retry without it
+        let profileData = data;
+        if (error && !data) {
+          const retry = await supabase
+            .from("profiles")
+            .select("username, elo, wins, losses, country")
+            .eq("id", session.user.id)
+            .maybeSingle();
+          profileData = retry.data as typeof data;
+        }
+
+        if (!profileData) {
           // Profile row missing — create it with null username so onboarding runs
           await supabase
             .from("profiles")
             .upsert({ id: session.user.id, username: null }, { onConflict: "id" });
           setProfile({ username: null, elo: 1200, wins: 0, losses: 0, country: null });
         } else {
-          setProfile(data as Profile);
+          setProfile(profileData as Profile);
+          if ((profileData as any).friend_code) setFriendCode((profileData as any).friend_code as string);
         }
         setProfileLoading(false);
       });
@@ -998,6 +1303,138 @@ export default function Page() {
         );
       });
   }, [session]);
+
+  // Fetch friends list
+  const fetchFriends = useCallback(async (userId: string) => {
+    const { data } = await supabase
+      .from("friendships")
+      .select("friend:profiles!friend_id(id, username, country, elo, wins, losses)")
+      .eq("user_id", userId);
+    if (data) {
+      setFriends(
+        data.map((row: any) => row.friend as Friend).filter(Boolean),
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!session || !profile?.username) return;
+    fetchFriends(session.user.id);
+  }, [session, profile?.username, fetchFriends]);
+
+  // Friend link handling
+  useEffect(() => {
+    const code = searchParams.get("friend");
+    if (!code || !session || !profile?.username) return;
+
+    (async () => {
+      const { data, error } = await supabase.rpc("add_friend_by_code", { p_friend_code: code });
+      if (error) {
+        setFriendToast("Failed to add friend.");
+      } else if (data?.error === "not_found") {
+        setFriendToast("Friend code not found.");
+      } else if (data?.error === "self") {
+        setFriendToast("That's your own code!");
+      } else {
+        setFriendToast("Friend added!");
+        fetchFriends(session.user.id);
+      }
+      router.replace("/");
+      setTimeout(() => setFriendToast(null), 3000);
+    })();
+  }, [searchParams, session, profile?.username, fetchFriends, router]);
+
+  // Dashboard socket for challenges & online status
+  useEffect(() => {
+    if (!session || !profile?.username) return;
+
+    const accessToken = session.access_token;
+    const socket = io(BACKEND, {
+      transports: ["websocket"],
+      auth: { accessToken },
+    });
+    dashboardSocketRef.current = socket;
+
+    socket.on("connect", () => {
+      socket.emit(
+        "auth.guest",
+        { username: profile.username },
+        () => {
+          // Request online status of friends
+          if (friends.length > 0) {
+            socket.emit(
+              "friends.status",
+              { friendIds: friends.map((f) => f.id) },
+              (online: string[]) => setOnlineUserIds(new Set(online)),
+            );
+          }
+        },
+      );
+    });
+
+    socket.on("challenge.received", (data: IncomingChallenge) => {
+      setPendingChallenge(data);
+    });
+
+    socket.on("challenge.expired", () => {
+      setChallengeWaiting(null);
+      setPendingChallenge(null);
+    });
+
+    socket.on("challenge.declined", () => {
+      setChallengeWaiting(null);
+    });
+
+    socket.on("match.found", ({ mode: mMode }: { matchId: string; opponent: any; mode?: Mode }) => {
+      setChallengeWaiting(null);
+      setPendingChallenge(null);
+      router.push(`/game?mode=${mMode ?? "ranked"}`);
+    });
+
+    return () => {
+      socket.disconnect();
+      dashboardSocketRef.current = null;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.access_token, profile?.username]);
+
+  // Refresh online status when friends list changes
+  useEffect(() => {
+    const socket = dashboardSocketRef.current;
+    if (!socket?.connected || friends.length === 0) return;
+    socket.emit(
+      "friends.status",
+      { friendIds: friends.map((f) => f.id) },
+      (online: string[]) => setOnlineUserIds(new Set(online)),
+    );
+  }, [friends]);
+
+  function handleChallenge(friendId: string, mode: Mode) {
+    const socket = dashboardSocketRef.current;
+    if (!socket?.connected) return;
+    socket.emit(
+      "challenge.create",
+      { toUserId: friendId, mode },
+      (res: { challengeId?: string; error?: string }) => {
+        if (res.challengeId) {
+          setChallengeWaiting(friendId);
+        }
+      },
+    );
+  }
+
+  function handleAcceptChallenge() {
+    const socket = dashboardSocketRef.current;
+    if (!socket?.connected || !pendingChallenge) return;
+    socket.emit("challenge.accept", { challengeId: pendingChallenge.challengeId });
+  }
+
+  function handleDeclineChallenge() {
+    const socket = dashboardSocketRef.current;
+    if (!socket?.connected || !pendingChallenge) return;
+    socket.emit("challenge.decline", { challengeId: pendingChallenge.challengeId });
+    setPendingChallenge(null);
+  }
 
   // Click-outside to close username menu
   useEffect(() => {
@@ -1260,23 +1697,64 @@ export default function Page() {
             <div ref={settingsRef}>
               <AccountCard onSignOut={signOut} />
             </div>
+            <RecentMatchesCard matches={recentMatches} />
           </div>
 
           {/* Right column */}
-          <LeaderboardCard
-            entries={leaderboard}
-            scope={leaderboardScope}
-            onScopeChange={setLeaderboardScope}
-            userRank={userRank}
-            userCountry={profile?.country}
-          />
+          <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+            <LeaderboardCard
+              entries={leaderboard}
+              scope={leaderboardScope}
+              onScopeChange={setLeaderboardScope}
+              userRank={userRank}
+              userCountry={profile?.country}
+            />
+            <FriendsCard
+              friends={friends}
+              friendCode={friendCode}
+              onlineUserIds={onlineUserIds}
+              onChallenge={handleChallenge}
+              pendingChallenge={pendingChallenge}
+              onAcceptChallenge={handleAcceptChallenge}
+              onDeclineChallenge={handleDeclineChallenge}
+              challengeWaiting={challengeWaiting}
+            />
+          </div>
         </div>
 
-        {/* Full-width recent matches */}
-        <div style={{ marginTop: "1.25rem" }}>
-          <RecentMatchesCard matches={recentMatches} />
-        </div>
+        {/* Friend toast */}
+        {friendToast && (
+          <div
+            style={{
+              position:     "fixed",
+              bottom:       24,
+              left:         "50%",
+              transform:    "translateX(-50%)",
+              background:   "var(--surface)",
+              border:       "1px solid var(--border)",
+              borderRadius: 6,
+              padding:      "0.6rem 1.2rem",
+              fontSize:     12,
+              fontFamily:   "monospace",
+              color:        "var(--text)",
+              zIndex:       1000,
+              boxShadow:    "0 4px 12px rgba(0,0,0,0.15)",
+            }}
+          >
+            {friendToast}
+          </div>
+        )}
       </main>
     </div>
+  );
+}
+
+// ── Export with Suspense (required for useSearchParams in Next.js App Router) ──
+
+export default function Page() {
+  return (
+    <Suspense>
+      <PageInner />
+    </Suspense>
   );
 }
