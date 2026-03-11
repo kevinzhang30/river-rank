@@ -8,8 +8,6 @@ import { ThemeToggle } from "@/ui/ThemeToggle";
 import { DeckToggle } from "@/ui/DeckToggle";
 import type { LeaderboardEntry, Mode } from "@/ui/types";
 
-const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4000";
-
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface Profile {
@@ -786,8 +784,33 @@ export default function Page() {
         setProfileLoading(false);
       });
 
-    // TODO: query Supabase matches table once populated by the backend RPC
-    setRecentMatches([]);
+    const userId = session.user.id;
+    supabase
+      .from("matches")
+      .select("id, p1, p2, winner, ranked, ended_at, p1_prof:profiles!p1(username), p2_prof:profiles!p2(username)")
+      .or(`p1.eq.${userId},p2.eq.${userId}`)
+      .not("ended_at", "is", null)
+      .order("ended_at", { ascending: false })
+      .limit(20)
+      .then(({ data }) => {
+        if (!data) return;
+        setRecentMatches(
+          data.map((row: any) => {
+            const isP1 = row.p1 === userId;
+            const opponentProf = isP1 ? row.p2_prof : row.p1_prof;
+            return {
+              id: row.id,
+              opponent: opponentProf?.username ?? "Unknown",
+              result:
+                row.winner === null ? "DRAW" :
+                row.winner === userId ? "WIN" : "LOSS",
+              mode: row.ranked ? "ranked" : "unranked",
+              ratingDelta: null,
+              timeAgo: timeAgo(row.ended_at),
+            } satisfies RecentMatch;
+          })
+        );
+      });
   }, [session]);
 
   // Click-outside to close username menu
@@ -801,13 +824,30 @@ export default function Page() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Leaderboard
+  // Leaderboard — refetch after auth so RLS-gated reads succeed
   useEffect(() => {
-    fetch(`${BACKEND}/leaderboard`)
-      .then((r) => r.json())
-      .then((data: LeaderboardEntry[]) => setLeaderboard(data.slice(0, 10)))
-      .catch(() => {});
-  }, []);
+    if (!session) return;
+    supabase
+      .from("profiles")
+      .select("id, username, elo, wins, losses")
+      .not("username", "is", null)
+      .order("elo", { ascending: false })
+      .limit(10)
+      .then(({ data, error }) => {
+        if (error) { console.error("leaderboard fetch error:", error); return; }
+        if (!data) return;
+        setLeaderboard(
+          data.map((row: any) => ({
+            id: row.id,
+            username: row.username,
+            elo: row.elo,
+            wins: row.wins,
+            losses: row.losses,
+            gamesPlayed: row.wins + row.losses,
+          }))
+        );
+      });
+  }, [session]);
 
   async function submitAuth() {
     if (!email.trim() || password.length < 6) return;
