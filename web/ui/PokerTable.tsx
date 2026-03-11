@@ -27,6 +27,7 @@ interface Props {
   onCall?:       () => void;
   onRaise?:      (amount: number) => void;
   onReveal?:     (cards: string[]) => void;
+  onReady?:      () => void;
   onForfeit?:              () => void;
   opponentDisconnectedAt?: number | null;
 }
@@ -40,6 +41,7 @@ export function PokerTable({
   onCall,
   onRaise,
   onReveal,
+  onReady,
   onForfeit,
   opponentDisconnectedAt,
 }: Props) {
@@ -317,9 +319,42 @@ export function PokerTable({
                       : `${state.players.find(p => p.userId === activeHandResult.winnerUserId)?.username ?? "?"} WINS $${activeHandResult.pot}`
                     }
                   </span>
-                  <span style={{ color: "var(--text3)", fontSize: 9, letterSpacing: 1, fontVariantNumeric: "tabular-nums" }}>
-                    NEXT HAND IN {Math.max(0, Math.ceil((activeHandResult.showUntilMs - Date.now()) / 1000))}s
-                  </span>
+                  {(() => {
+                    const heroReady = state.readyPlayers?.includes(heroUserId) ?? false;
+                    const countdown = Math.max(0, Math.ceil((activeHandResult.showUntilMs - Date.now()) / 1000));
+                    if (!heroReady) {
+                      return (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <button
+                            onClick={() => onReady?.()}
+                            style={{
+                              background:    "transparent",
+                              color:         "var(--text2)",
+                              border:        "1px solid var(--border)",
+                              borderRadius:  3,
+                              padding:       "4px 14px",
+                              fontSize:      10,
+                              fontWeight:    700,
+                              cursor:        "pointer",
+                              fontFamily:    "monospace",
+                              letterSpacing: 1,
+                              textTransform: "uppercase",
+                            }}
+                          >
+                            Ready
+                          </button>
+                          <span style={{ color: "var(--text3)", fontSize: 9, letterSpacing: 1, fontVariantNumeric: "tabular-nums" }}>
+                            {countdown}s
+                          </span>
+                        </div>
+                      );
+                    }
+                    return (
+                      <span style={{ color: "var(--text3)", fontSize: 9, letterSpacing: 1, fontVariantNumeric: "tabular-nums" }}>
+                        Waiting for opponent... {countdown}s
+                      </span>
+                    );
+                  })()}
                 </div>
               ) : state.pot > 0 ? (
                 <span>

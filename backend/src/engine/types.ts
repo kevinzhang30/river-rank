@@ -94,6 +94,10 @@ export interface InternalGameState {
   consecutiveTimeouts: Record<string, number>;
   /** Tracks disconnected players and their 30s reconnection timers. */
   disconnectedPlayers: Record<string, { since: number; timer: ReturnType<typeof setTimeout> }>;
+  /** Timer ID for the 7s inter-hand delay, so it can be cleared early. */
+  nextHandTimerId?: ReturnType<typeof setTimeout>;
+  /** Tracks which players have clicked "Ready" to skip the inter-hand wait. */
+  readyForNextHand: Record<string, boolean>;
 }
 
 // ── Hand result (broadcast after each hand ends) ─────────────────────────────

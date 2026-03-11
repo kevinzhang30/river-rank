@@ -147,6 +147,7 @@ function toPublicState(state: InternalGameState) {
     })(),
     nextSmallBlind: Math.round(state.smallBlind * state.config.blindIncreaseFactor),
     nextBigBlind:   Math.round(state.smallBlind * state.config.blindIncreaseFactor) * 2,
+    readyPlayers:   Object.keys(state.readyForNextHand).filter(id => state.readyForNextHand[id]),
   };
 }
 
@@ -327,7 +328,7 @@ function resolveShowdown(state: InternalGameState): void {
     });
     emitGameState(state);
     state.handNumber++;
-    setTimeout(() => startNextHand(state), 7_000);
+    state.nextHandTimerId = setTimeout(() => startNextHand(state), 7_000);
   } else {
     // Winner takes pot — show showdown board first, then award
     emitGameState(state);
@@ -538,6 +539,7 @@ function forfeitMatch(
   const winnerUsername = state.players.find((p) => p.id !== loserId)!.username;
 
   // Clear all timers
+  if (state.nextHandTimerId) { clearTimeout(state.nextHandTimerId); state.nextHandTimerId = undefined; }
   const existingBotTimer = botTimers.get(state.matchId);
   if (existingBotTimer) { clearTimeout(existingBotTimer); botTimers.delete(state.matchId); }
   clearTurnTimer(state);
@@ -717,11 +719,13 @@ function endHand(state: InternalGameState, winnerIndex: 0 | 1, reason: "FOLD" | 
     console.log(`[blinds] hand #${state.handNumber} → ${state.smallBlind}/${state.bigBlind}`);
   }
 
-  setTimeout(() => startNextHand(state), 7_000);
+  state.nextHandTimerId = setTimeout(() => startNextHand(state), 7_000);
 }
 
 function startNewHand(state: InternalGameState): void {
   if (state.ended) return;
+  state.readyForNextHand = {};
+  state.nextHandTimerId = undefined;
   const now  = new Date().toISOString();
   const deck = shuffle(newDeck());
   const [p0, p1] = state.players;
@@ -822,6 +826,7 @@ async function createMatch(p1: User, p2: User, mode: Mode, botDifficulty?: BotDi
     turnDeadlineMs:         0, // set by startNewHand
     consecutiveTimeouts:    { [p1.userId]: 0, [p2.userId]: 0 },
     disconnectedPlayers:    {},
+    readyForNextHand:       {},
   };
 
   matches.set(matchId, state);
@@ -1060,6 +1065,28 @@ io.on("connection", (socket: Socket) => {
       emitGameState(state);
     },
   );
+
+  socket.on("hand.ready", ({ matchId }: { matchId: string }) => {
+    const user = users.get(socket.id);
+    if (!user) return;
+    const state = matches.get(matchId);
+    if (!state || !state.handResult) return;
+    if (Date.now() >= state.handResult.showUntilMs) return;
+
+    state.readyForNextHand[user.userId] = true;
+
+    const isBotMatch = state.players.some((p) => p.id === BOT_ID);
+    const allReady = isBotMatch
+      ? state.players.some((p) => p.id !== BOT_ID && state.readyForNextHand[p.id])
+      : state.players.every((p) => state.readyForNextHand[p.id]);
+
+    if (allReady) {
+      clearTimeout(state.nextHandTimerId);
+      startNextHand(state);
+    } else {
+      emitGameState(state);
+    }
+  });
 
   socket.on("game.forfeit", ({ matchId }: { matchId: string }) => {
     const user = users.get(socket.id);

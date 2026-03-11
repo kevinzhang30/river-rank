@@ -44,6 +44,7 @@ export interface PublicGameState {
   handsUntilBlindIncrease?: number;
   nextSmallBlind?:           number;
   nextBigBlind?:             number;
+  readyPlayers?:             string[];
 }
 
 export interface HandResult {
