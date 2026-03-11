@@ -184,6 +184,11 @@ function GameView() {
     socketRef.current?.emit("hand.reveal", { matchId, cards });
   }
 
+  function sendReady() {
+    if (!matchId) return;
+    socketRef.current?.emit("hand.ready", { matchId });
+  }
+
   function sendForfeit() {
     if (!matchId) return;
     socketRef.current?.emit("game.forfeit", { matchId });
@@ -264,6 +269,7 @@ function GameView() {
           onCall={() => sendAction("CALL")}
           onRaise={(amount) => sendAction("RAISE_TO", amount)}
           onReveal={sendReveal}
+          onReady={sendReady}
           onForfeit={sendForfeit}
           opponentDisconnectedAt={opponentDisconnectedAt}
         />
