@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
@@ -706,6 +706,10 @@ export default function Page() {
   const [leaderboard, setLeaderboard]     = useState<LeaderboardEntry[]>([]);
   const [recentMatches, setRecentMatches] = useState<RecentMatch[]>([]);
 
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef     = useRef<HTMLDivElement>(null);
+  const settingsRef = useRef<HTMLDivElement>(null);
+
   // Session
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -751,6 +755,17 @@ export default function Page() {
     setRecentMatches([]);
   }, [session]);
 
+  // Click-outside to close username menu
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   // Leaderboard
   useEffect(() => {
     fetch(`${BACKEND}/leaderboard`)
@@ -783,6 +798,11 @@ export default function Page() {
 
   async function signOut() {
     await supabase.auth.signOut();
+  }
+
+  function scrollToSettings() {
+    settingsRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setMenuOpen(false);
   }
 
   if (!authChecked) return null;
@@ -843,9 +863,61 @@ export default function Page() {
         }}
       >
         <span className="wordmark" style={{ fontWeight: 800, fontSize: 13 }}>RiverRank ♠</span>
-        <span style={{ color: "var(--text3)", fontSize: 12 }}>
-          {profile?.username ?? ""}
-        </span>
+        <div ref={menuRef} style={{ position: "relative" }}>
+          <button
+            onClick={() => setMenuOpen(o => !o)}
+            style={{
+              background:  "transparent",
+              border:      "none",
+              cursor:      "pointer",
+              color:       "var(--text3)",
+              fontSize:    12,
+              fontFamily:  "monospace",
+              display:     "flex",
+              alignItems:  "center",
+              gap:         4,
+              padding:     "4px 6px",
+              borderRadius: 4,
+            }}
+          >
+            {profile?.username ?? ""} <span style={{ fontSize: 10 }}>▾</span>
+          </button>
+          {menuOpen && (
+            <div style={{
+              position:   "absolute",
+              top:        "calc(100% + 6px)",
+              right:      0,
+              background: "var(--surface)",
+              border:     "1px solid var(--border)",
+              borderRadius: 6,
+              minWidth:   160,
+              zIndex:     100,
+              overflow:   "hidden",
+            }}>
+              {[
+                { label: "Profile Settings", action: scrollToSettings },
+                { label: "Sign Out",         action: () => { signOut(); setMenuOpen(false); } },
+              ].map(({ label, action }) => (
+                <button key={label} onClick={action} style={{
+                  display:      "block",
+                  width:        "100%",
+                  background:   "transparent",
+                  border:       "none",
+                  borderBottom: label !== "Sign Out" ? "1px solid var(--border)" : "none",
+                  color:        label === "Sign Out" ? "var(--danger)" : "var(--text2)",
+                  fontSize:     12,
+                  fontFamily:   "monospace",
+                  padding:      "10px 14px",
+                  textAlign:    "left",
+                  cursor:       "pointer",
+                  letterSpacing: 0.3,
+                }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </header>
 
       {/* Main content */}
@@ -869,7 +941,9 @@ export default function Page() {
           <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
             {profile && <ProfileCard profile={profile} />}
             <PlayCard onPlay={(mode) => router.push(`/game?mode=${mode}`)} />
-            <AccountCard onSignOut={signOut} />
+            <div ref={settingsRef}>
+              <AccountCard onSignOut={signOut} />
+            </div>
           </div>
 
           {/* Right column */}
