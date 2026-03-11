@@ -1,3 +1,5 @@
+<img width="2000" height="2000" alt="RiverRank" src="https://github.com/user-attachments/assets/4f8b2206-3653-469c-ab57-3d0f457a8455" />
+
 # RiverRank
 
 RiverRank is a real-time multiplayer heads-up poker platform featuring ranked Elo matchmaking, server-authoritative game logic, and authenticated user accounts.
