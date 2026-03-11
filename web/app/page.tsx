@@ -15,6 +15,7 @@ interface Profile {
   elo:      number;
   wins:     number;
   losses:   number;
+  country:  string | null;
 }
 
 interface RecentMatch {
@@ -63,7 +64,7 @@ function Card({
   );
 }
 
-function CardLabel({ children }: { children: React.ReactNode }) {
+function CardLabel({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return (
     <div
       style={{
@@ -73,6 +74,7 @@ function CardLabel({ children }: { children: React.ReactNode }) {
         color:         "var(--text3)",
         textTransform: "uppercase",
         marginBottom:  "1rem",
+        ...style,
       }}
     >
       {children}
@@ -88,7 +90,7 @@ function ProfileCard({ profile }: { profile: Profile }) {
       <CardLabel>Profile</CardLabel>
       <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
         <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text)", letterSpacing: 0.5 }}>
-          {profile.username ?? "—"}
+          {profile.username ?? "—"}{profile.country && COUNTRY_MAP[profile.country] ? ` ${COUNTRY_MAP[profile.country].flag}` : ""}
         </div>
         <div style={{ display: "flex", gap: "1.5rem", alignItems: "baseline" }}>
           <span>
@@ -235,10 +237,49 @@ function AccountCard({ onSignOut }: { onSignOut: () => void }) {
 
 // ── Leaderboard card ──────────────────────────────────────────────────────────
 
-function LeaderboardCard({ entries }: { entries: LeaderboardEntry[] }) {
+function LeaderboardCard({
+  entries,
+  scope,
+  onScopeChange,
+  userRank,
+  userCountry,
+}: {
+  entries:       LeaderboardEntry[];
+  scope:         "global" | "national";
+  onScopeChange: (scope: "global" | "national") => void;
+  userRank:      { global: number | null; national: number | null };
+  userCountry:   string | null | undefined;
+}) {
+  const rankValue = scope === "global" ? userRank.global : userRank.national;
+
   return (
     <Card>
-      <CardLabel>Leaderboard</CardLabel>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem" }}>
+        <CardLabel style={{ marginBottom: 0 }}>Leaderboard</CardLabel>
+        <div style={{ display: "grid", gridTemplateColumns: userCountry ? "1fr 1fr" : "1fr", gap: 6 }}>
+          {(["global", ...(userCountry ? ["national"] : [])] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => onScopeChange(s as "global" | "national")}
+              style={{
+                background:    scope === s ? "var(--primaryBtn)" : "var(--surface2)",
+                color:         scope === s ? "var(--primaryBtnText)" : "var(--text2)",
+                border:        `1px solid ${scope === s ? "transparent" : "var(--border)"}`,
+                borderRadius:  4,
+                padding:       "0.35rem 0.65rem",
+                fontSize:      10,
+                fontFamily:    "monospace",
+                fontWeight:    scope === s ? 700 : 400,
+                cursor:        "pointer",
+                letterSpacing: 0.3,
+                textTransform: "capitalize",
+              }}
+            >
+              {s === "national" && userCountry && COUNTRY_MAP[userCountry] ? `${COUNTRY_MAP[userCountry].flag} ` : ""}{s}
+            </button>
+          ))}
+        </div>
+      </div>
       {entries.length === 0 ? (
         <div style={{ color: "var(--text3)", fontSize: 12, textAlign: "center", padding: "0.5rem 0" }}>
           No players yet
@@ -286,6 +327,20 @@ function LeaderboardCard({ entries }: { entries: LeaderboardEntry[] }) {
             ))}
           </tbody>
         </table>
+      )}
+      {rankValue !== null && (
+        <div
+          style={{
+            marginTop:     "0.75rem",
+            paddingTop:    "0.75rem",
+            borderTop:     "1px solid var(--border)",
+            fontSize:      12,
+            color:         "var(--text2)",
+            textAlign:     "center",
+          }}
+        >
+          You are ranked <span style={{ fontWeight: 700, color: "var(--text)" }}>#{rankValue}</span> {scope === "national" ? "nationally" : "globally"}
+        </div>
       )}
     </Card>
   );
@@ -617,11 +672,18 @@ function ChooseUsernameView({
             value={country}
             onChange={(e) => setCountry(e.target.value)}
             style={{
-              background:   "var(--surface2)",
+              appearance:       "none",
+              WebkitAppearance: "none",
+              background:       "var(--surface2)",
+              backgroundImage:  `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`,
+              backgroundRepeat:   "no-repeat",
+              backgroundPosition: "right 0.75rem center",
+              backgroundSize:     "0.75rem",
               border:       "1px solid var(--border)",
               borderRadius: 4,
               color:        country ? "var(--text)" : "var(--text3)",
               padding:      "0.6rem 0.9rem",
+              paddingRight: "2rem",
               fontSize:     "0.9rem",
               fontFamily:   "monospace",
               outline:      "none",
@@ -860,6 +922,8 @@ export default function Page() {
 
   const [leaderboard, setLeaderboard]     = useState<LeaderboardEntry[]>([]);
   const [recentMatches, setRecentMatches] = useState<RecentMatch[]>([]);
+  const [leaderboardScope, setLeaderboardScope] = useState<"global" | "national">("global");
+  const [userRank, setUserRank] = useState<{ global: number | null; national: number | null }>({ global: null, national: null });
 
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef     = useRef<HTMLDivElement>(null);
@@ -890,7 +954,7 @@ export default function Page() {
 
     supabase
       .from("profiles")
-      .select("username, elo, wins, losses")
+      .select("username, elo, wins, losses, country")
       .eq("id", session.user.id)
       .maybeSingle()
       .then(async ({ data }) => {
@@ -899,7 +963,7 @@ export default function Page() {
           await supabase
             .from("profiles")
             .upsert({ id: session.user.id, username: null }, { onConflict: "id" });
-          setProfile({ username: null, elo: 1200, wins: 0, losses: 0 });
+          setProfile({ username: null, elo: 1200, wins: 0, losses: 0, country: null });
         } else {
           setProfile(data as Profile);
         }
@@ -949,10 +1013,14 @@ export default function Page() {
   // Leaderboard — refetch after auth so RLS-gated reads succeed
   useEffect(() => {
     if (!session) return;
-    supabase
+    let query = supabase
       .from("profiles")
       .select("id, username, elo, wins, losses, country")
-      .not("username", "is", null)
+      .not("username", "is", null);
+    if (leaderboardScope === "national" && profile?.country) {
+      query = query.eq("country", profile.country);
+    }
+    query
       .order("elo", { ascending: false })
       .limit(10)
       .then(({ data, error }) => {
@@ -970,7 +1038,35 @@ export default function Page() {
           }))
         );
       });
-  }, [session]);
+  }, [session, leaderboardScope, profile?.country]);
+
+  // User rank
+  useEffect(() => {
+    if (!session || !profile?.elo) return;
+    // Global rank
+    supabase
+      .from("profiles")
+      .select("id", { count: "exact", head: true })
+      .not("username", "is", null)
+      .gt("elo", profile.elo)
+      .then(({ count }) => {
+        setUserRank((prev) => ({ ...prev, global: count !== null ? count + 1 : null }));
+      });
+    // National rank
+    if (profile.country) {
+      supabase
+        .from("profiles")
+        .select("id", { count: "exact", head: true })
+        .not("username", "is", null)
+        .eq("country", profile.country)
+        .gt("elo", profile.elo)
+        .then(({ count }) => {
+          setUserRank((prev) => ({ ...prev, national: count !== null ? count + 1 : null }));
+        });
+    } else {
+      setUserRank((prev) => ({ ...prev, national: null }));
+    }
+  }, [session, profile?.elo, profile?.country]);
 
   async function submitAuth() {
     const trimmed = identifier.trim();
@@ -1167,7 +1263,13 @@ export default function Page() {
           </div>
 
           {/* Right column */}
-          <LeaderboardCard entries={leaderboard} />
+          <LeaderboardCard
+            entries={leaderboard}
+            scope={leaderboardScope}
+            onScopeChange={setLeaderboardScope}
+            userRank={userRank}
+            userCountry={profile?.country}
+          />
         </div>
 
         {/* Full-width recent matches */}
