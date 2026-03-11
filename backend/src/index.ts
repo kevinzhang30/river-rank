@@ -846,13 +846,17 @@ async function createMatch(p1: User, p2: User, mode: Mode, botDifficulty?: BotDi
   if (botDifficulty) botDifficulties.set(matchId, botDifficulty);
 
   const room = `match:${matchId}`;
-  io.sockets.sockets.get(sbUser.socketId)?.join(room);
-  io.sockets.sockets.get(bbUser.socketId)?.join(room);
+  for (const sid of io.sockets.adapter.rooms.get(`user:${sbUser.userId}`) ?? []) {
+    io.sockets.sockets.get(sid)?.join(room);
+  }
+  for (const sid of io.sockets.adapter.rooms.get(`user:${bbUser.userId}`) ?? []) {
+    io.sockets.sockets.get(sid)?.join(room);
+  }
 
-  io.sockets.sockets.get(sbUser.socketId)?.emit("match.found", {
+  io.to(`user:${sbUser.userId}`).emit("match.found", {
     matchId, opponent: { userId: bbUser.userId, username: bbUser.username }, mode,
   });
-  io.sockets.sockets.get(bbUser.socketId)?.emit("match.found", {
+  io.to(`user:${bbUser.userId}`).emit("match.found", {
     matchId, opponent: { userId: sbUser.userId, username: sbUser.username }, mode,
   });
 
@@ -937,6 +941,7 @@ io.on("connection", (socket: Socket) => {
         elo:      dbUser.elo,
       };
       users.set(socket.id, user);
+      socket.join(`user:${user.userId}`);
       console.log(`[auth] ${user.username} (${user.userId.slice(0, 8)}) elo=${user.elo}`);
       ack({ userId: user.userId, username: user.username, elo: user.elo });
 
@@ -1158,18 +1163,12 @@ io.on("connection", (socket: Socket) => {
       });
 
       // Also try instant socket delivery if target is connected
-      for (const [, u] of users) {
-        if (u.userId === toUserId) {
-          const targetSocket = io.sockets.sockets.get(u.socketId);
-          targetSocket?.emit("challenge.received", {
-            challengeId,
-            fromUsername: user.username,
-            fromUserId: user.userId,
-            mode,
-          });
-          break;
-        }
-      }
+      io.to(`user:${toUserId}`).emit("challenge.received", {
+        challengeId,
+        fromUsername: user.username,
+        fromUserId: user.userId,
+        mode,
+      });
 
       ack({ challengeId });
       console.log(`[challenge] ${user.username} → ${toUserId.slice(0, 8)} mode=${mode} id=${challengeId.slice(0, 8)}`);
@@ -1208,6 +1207,28 @@ io.on("connection", (socket: Socket) => {
   );
 
   socket.on(
+    "challenge.cancel",
+    ({ challengeId }: { challengeId: string }) => {
+      const user = users.get(socket.id);
+      if (!user) return;
+
+      const challenge = pendingChallenges.get(challengeId);
+      if (!challenge || challenge.fromUser.userId !== user.userId) return;
+
+      clearTimeout(challenge.timer);
+      pendingChallenges.delete(challengeId);
+      supabaseAdmin.from("pending_challenges").delete().eq("id", challengeId).then(({ error }) => {
+        if (error) console.error("[challenge] db delete (cancel) error:", error.message);
+      });
+
+      // Notify target that challenge was cancelled
+      io.to(`user:${challenge.toUserId}`).emit("challenge.expired", { challengeId });
+
+      console.log(`[challenge] cancelled ${challengeId.slice(0, 8)} by ${user.username}`);
+    },
+  );
+
+  socket.on(
     "challenge.decline",
     ({ challengeId }: { challengeId: string }) => {
       const user = users.get(socket.id);
@@ -1223,13 +1244,7 @@ io.on("connection", (socket: Socket) => {
       });
 
       // Notify challenger
-      for (const [, u] of users) {
-        if (u.userId === challenge.fromUser.userId) {
-          const challengerSocket = io.sockets.sockets.get(u.socketId);
-          challengerSocket?.emit("challenge.declined", { challengeId });
-          break;
-        }
-      }
+      io.to(`user:${challenge.fromUser.userId}`).emit("challenge.declined", { challengeId });
 
       console.log(`[challenge] declined ${challengeId.slice(0, 8)}`);
     },
@@ -1253,12 +1268,7 @@ io.on("connection", (socket: Socket) => {
             if (error) console.error("[challenge] db delete (disconnect) error:", error.message);
           });
           // Notify target
-          for (const [, u] of users) {
-            if (u.userId === challenge.toUserId) {
-              io.sockets.sockets.get(u.socketId)?.emit("challenge.expired", { challengeId: cid });
-              break;
-            }
-          }
+          io.to(`user:${challenge.toUserId}`).emit("challenge.expired", { challengeId: cid });
         }
       }
 
