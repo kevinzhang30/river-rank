@@ -9,6 +9,7 @@ import { ActionLog } from "./ActionLog";
 import { ThemeToggle } from "./ThemeToggle";
 import { DeckToggle } from "./DeckToggle";
 import { HandCheatSheet } from "./HandCheatSheet";
+import { useIsMobile } from "@/lib/useIsMobile";
 
 const STREET_LABEL: Record<string, string> = {
   preflop:  "PREFLOP",
@@ -52,6 +53,10 @@ export function PokerTable({
   const [forfeitConfirm, setForfeitConfirm] = useState(false);
   const forfeitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Pre-action state
+  type PreAction = "fold" | "check-call" | null;
+  const [preAction, setPreAction] = useState<PreAction>(null);
+
   // 250ms interval: keeps the turn countdown ticking smoothly
   useEffect(() => {
     const interval = setInterval(() => setTick((t) => t + 1), 250);
@@ -74,6 +79,11 @@ export function PokerTable({
   useEffect(() => {
     setPickingCard(false);
   }, [state.handResult?.handId]);
+
+  // Clear pre-action on hand changes
+  useEffect(() => {
+    setPreAction(null);
+  }, [state.handNumber, state.handResult?.handId]);
 
   const activeHandResult: HandResult | null =
     state.handResult && Date.now() < state.handResult.showUntilMs
@@ -99,6 +109,8 @@ export function PokerTable({
     !activeHandResult.reveals?.[heroUserId] &&
     heroHoleCards !== null;
 
+  const isMobile = useIsMobile();
+
   const legal = state.legalActions ?? (
     hero.isToAct && !hero.folded
       ? {
@@ -110,10 +122,25 @@ export function PokerTable({
       : undefined
   );
 
+  const showPreActions = !hero.isToAct && !hero.folded && !activeHandResult;
+
+  // Auto-fire pre-action when hero's turn arrives
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!preAction || !hero.isToAct || hero.folded) return;
+    if (preAction === "fold") {
+      onFold?.();
+    } else if (preAction === "check-call") {
+      if (legal?.canCheck) onCheck?.();
+      else if (legal?.canCall) onCall?.();
+    }
+    setPreAction(null);
+  }, [hero.isToAct, preAction]);
+
   return (
     <div
       style={{
-        height:        "100vh",
+        height:        "100dvh",
         display:       "flex",
         flexDirection: "column",
         background:    "var(--bg)",
@@ -139,12 +166,16 @@ export function PokerTable({
           RiverRank ♠
         </span>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 16, fontSize: 10 }}>
-          <span>
-            <span style={{ color: "var(--text3)" }}>HAND </span>
-            <span style={{ color: "var(--text2)" }}>#{state.handNumber}</span>
-          </span>
-          <span style={{ color: "var(--border)" }}>|</span>
+        <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 16, fontSize: 10 }}>
+          {!isMobile && (
+            <>
+              <span>
+                <span style={{ color: "var(--text3)" }}>HAND </span>
+                <span style={{ color: "var(--text2)" }}>#{state.handNumber}</span>
+              </span>
+              <span style={{ color: "var(--border)" }}>|</span>
+            </>
+          )}
           <span style={{ color: "var(--text2)", letterSpacing: 1 }}>
             {STREET_LABEL[state.street] ?? state.street.toUpperCase()}
           </span>
@@ -153,7 +184,7 @@ export function PokerTable({
             <span style={{ color: "var(--text3)" }}>BLINDS </span>
             <span style={{ color: "var(--text2)" }}>{state.smallBlind}/{state.bigBlind}</span>
           </span>
-          {state.handsUntilBlindIncrease !== undefined && state.nextBigBlind !== undefined && (
+          {!isMobile && state.handsUntilBlindIncrease !== undefined && state.nextBigBlind !== undefined && (
             <>
               <span style={{ color: "var(--border)" }}>|</span>
               <span>
@@ -176,23 +207,25 @@ export function PokerTable({
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span
-            style={{
-              background:    "transparent",
-              color:         state.mode === "ranked" ? "var(--primaryBtn)" : "var(--text3)",
-              border:        state.mode === "ranked"
-                ? "1px solid var(--primaryBtn)"
-                : "1px solid var(--border)",
-              borderRadius:  2,
-              padding:       "2px 8px",
-              fontSize:      9,
-              fontWeight:    700,
-              letterSpacing: 1.5,
-              textTransform: "uppercase",
-            }}
-          >
-            {state.mode}
-          </span>
+          {!isMobile && (
+            <span
+              style={{
+                background:    "transparent",
+                color:         state.mode === "ranked" ? "var(--primaryBtn)" : "var(--text3)",
+                border:        state.mode === "ranked"
+                  ? "1px solid var(--primaryBtn)"
+                  : "1px solid var(--border)",
+                borderRadius:  2,
+                padding:       "2px 8px",
+                fontSize:      9,
+                fontWeight:    700,
+                letterSpacing: 1.5,
+                textTransform: "uppercase",
+              }}
+            >
+              {state.mode}
+            </span>
+          )}
           <button
             onClick={() => {
               if (forfeitConfirm) {
@@ -244,8 +277,8 @@ export function PokerTable({
           >
             ?
           </button>
-          <DeckToggle />
-          <ThemeToggle />
+          {!isMobile && <DeckToggle />}
+          {!isMobile && <ThemeToggle />}
         </div>
       </div>
 
@@ -260,7 +293,7 @@ export function PokerTable({
             flexDirection:  "column",
             alignItems:     "center",
             justifyContent: "space-between",
-            padding:        "28px 32px",
+            padding:        isMobile ? "12px 8px" : "28px 32px",
             overflow:       "hidden",
             background:     "var(--bg)",
           }}
@@ -476,7 +509,7 @@ export function PokerTable({
         </div>
 
         {/* Activity log */}
-        <ActionLog entries={state.log} />
+        {!isMobile && <ActionLog entries={state.log} />}
       </div>
 
       {/* ── Action bar ───────────────────────────────────────────────── */}
@@ -488,6 +521,9 @@ export function PokerTable({
         onCheck={onCheck}
         onCall={onCall}
         onRaise={onRaise}
+        preAction={preAction}
+        onPreAction={setPreAction}
+        showPreActions={showPreActions}
       />
 
       {showCheatSheet && <HandCheatSheet onClose={() => setShowCheatSheet(false)} />}

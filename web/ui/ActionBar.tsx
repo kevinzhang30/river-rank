@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import type { LegalActions } from "./types";
+import { useIsMobile } from "@/lib/useIsMobile";
 
 // ── Primitive button ──────────────────────────────────────────────────────────
 
@@ -14,10 +15,24 @@ interface BtnProps {
   onClick?:  () => void;
   small?:    boolean;
   flex?:     number;
+  active?:   boolean;
 }
 
-function ActionButton({ label, variant, disabled = false, onClick, small = false, flex }: BtnProps) {
+function ActionButton({ label, variant, disabled = false, onClick, small = false, flex, active = false }: BtnProps) {
   const h = small ? 34 : 44;
+
+  const activeStyle: Partial<Record<BtnVariant, React.CSSProperties>> = {
+    fold: {
+      background: "rgba(239, 68, 68, 0.15)",
+      color:      "var(--danger)",
+      border:     "2px solid var(--danger)",
+    },
+    call: {
+      background: "rgba(59, 130, 246, 0.15)",
+      color:      "var(--primaryBtn)",
+      border:     "2px solid var(--primaryBtn)",
+    },
+  };
 
   const variantStyle: Record<BtnVariant, React.CSSProperties> = {
     fold:  {
@@ -69,7 +84,9 @@ function ActionButton({ label, variant, disabled = false, onClick, small = false
         flexShrink:    0,
         textTransform: "uppercase",
         ...(flex !== undefined ? { flex } : {}),
-        ...variantStyle[variant],
+        ...(active && activeStyle[variant]
+          ? activeStyle[variant]
+          : variantStyle[variant]),
       }}
     >
       {label}
@@ -87,9 +104,13 @@ interface Props {
   onCheck?: () => void;
   onCall?:  () => void;
   onRaise?: (amount: number) => void;
+  preAction?:      "fold" | "check-call" | null;
+  onPreAction?:    (action: "fold" | "check-call" | null) => void;
+  showPreActions?: boolean;
 }
 
-export function ActionBar({ legal, pot, bigBlind, onFold, onCheck, onCall, onRaise }: Props) {
+export function ActionBar({ legal, pot, bigBlind, onFold, onCheck, onCall, onRaise, preAction, onPreAction, showPreActions }: Props) {
+  const isMobile = useIsMobile();
   const [rawInput, setRawInput] = useState("");
 
   useEffect(() => {
@@ -134,13 +155,45 @@ export function ActionBar({ legal, pot, bigBlind, onFold, onCheck, onCall, onRai
     <div style={{ width: 1, alignSelf: "stretch", background: "var(--border)", margin: "0 2px" }} />
   );
 
+  if (showPreActions && !isActive) {
+    return (
+      <div
+        style={{
+          background: "var(--surface)",
+          borderTop:  "1px solid var(--border)",
+          flexShrink: 0,
+          padding:    isMobile ? "10px 10px" : "14px 20px",
+          display:    "flex",
+          gap:        8,
+        }}
+      >
+        <ActionButton
+          label="Pre-Fold"
+          variant="fold"
+          active={preAction === "fold"}
+          onClick={() => onPreAction?.(preAction === "fold" ? null : "fold")}
+          flex={1}
+        />
+        <ActionButton
+          label="Check / Call"
+          variant="call"
+          active={preAction === "check-call"}
+          onClick={() => onPreAction?.(preAction === "check-call" ? null : "check-call")}
+          flex={1}
+        />
+      </div>
+    );
+  }
+
   return (
     <div
       style={{
         background:    "var(--surface)",
         borderTop:     "1px solid var(--border)",
         flexShrink:    0,
-        padding:       canRaise ? "10px 20px 12px" : "14px 20px",
+        padding:       canRaise
+          ? (isMobile ? "8px 10px 10px" : "10px 20px 12px")
+          : (isMobile ? "10px 10px" : "14px 20px"),
         display:       "flex",
         flexDirection: "column",
         gap:           8,
@@ -175,7 +228,7 @@ export function ActionBar({ legal, pot, bigBlind, onFold, onCheck, onCall, onRai
 
       {/* ── Row 2: Presets + All-in + input ───────────────────────────── */}
       {canRaise && (
-        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: isMobile ? "wrap" : undefined }}>
           {show2x && (
             <ActionButton label={`2×  $${amt2x}`} variant="preset" small onClick={() => firePreset(amt2x)} />
           )}
@@ -203,7 +256,7 @@ export function ActionBar({ legal, pot, bigBlind, onFold, onCheck, onCall, onRai
             onBlur={clampInput}
             onKeyDown={(e) => e.key === "Enter" && handleRaiseSubmit()}
             style={{
-              width:        80,
+              width:        isMobile ? 64 : 80,
               height:       34,
               background:   "var(--surface2)",
               border:       `1px solid ${inputValid ? "var(--border)" : "var(--danger)"}`,
