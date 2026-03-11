@@ -44,6 +44,7 @@ function GameView() {
     winnerId:       string;
     winnerUsername: string;
     ratingDelta:    Record<string, number> | null;
+    reason?:        string;
   } | null>(null);
 
   const [queueStartMs, setQueueStartMs]   = useState<number | null>(null);
@@ -51,6 +52,7 @@ function GameView() {
   const [liveState, setLiveState]         = useState<PublicGameState | null>(null);
   const [liveHeroCards, setLiveHeroCards] = useState<[string, string] | null>(null);
   const [rawBackendState, setRawBackendState] = useState<BackendGameState | null>(null);
+  const [opponentDisconnectedAt, setOpponentDisconnectedAt] = useState<number | null>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
@@ -133,16 +135,25 @@ function GameView() {
 
       socket.on(
         "match.ended",
-        ({ winnerId, winnerUsername, ratingDelta }: {
+        ({ winnerId, winnerUsername, ratingDelta, reason }: {
           matchId:        string;
           winnerId:       string;
           winnerUsername: string;
           ranked:         boolean;
           ratingDelta:    Record<string, number> | null;
+          reason?:        string;
         }) => {
-          setMatchResult({ winnerId, winnerUsername, ratingDelta: ratingDelta ?? null });
+          setMatchResult({ winnerId, winnerUsername, ratingDelta: ratingDelta ?? null, reason });
         },
       );
+
+      socket.on("player.disconnected", () => {
+        setOpponentDisconnectedAt(Date.now());
+      });
+
+      socket.on("player.reconnected", () => {
+        setOpponentDisconnectedAt(null);
+      });
 
       socket.on("connect_error", (err) => {
         if (err.message === "unauthorized") {
@@ -171,6 +182,11 @@ function GameView() {
   function sendReveal(cards: string[]) {
     if (!matchId) return;
     socketRef.current?.emit("hand.reveal", { matchId, cards });
+  }
+
+  function sendForfeit() {
+    if (!matchId) return;
+    socketRef.current?.emit("game.forfeit", { matchId });
   }
 
   function backToLobby() {
@@ -248,6 +264,8 @@ function GameView() {
           onCall={() => sendAction("CALL")}
           onRaise={(amount) => sendAction("RAISE_TO", amount)}
           onReveal={sendReveal}
+          onForfeit={sendForfeit}
+          opponentDisconnectedAt={opponentDisconnectedAt}
         />
         <DebugPanel state={debugState} />
 
@@ -307,7 +325,13 @@ function GameView() {
                 {isWinner ? "You Win" : "You Lose"}
               </div>
               <div style={{ color: "var(--text2)", fontSize: 13 }}>
-                {isWinner
+                {matchResult.reason === "FORFEIT"
+                  ? isWinner ? "Your opponent forfeited." : "You forfeited the match."
+                  : matchResult.reason === "DISCONNECT"
+                  ? isWinner ? "Your opponent disconnected." : "You were disconnected."
+                  : matchResult.reason === "TIMEOUT"
+                  ? isWinner ? "Your opponent timed out." : "You timed out."
+                  : isWinner
                   ? "Your opponent ran out of chips."
                   : `${matchResult.winnerUsername} wins the match.`}
               </div>

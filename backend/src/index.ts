@@ -41,10 +41,11 @@ const RUNOUT_STREET_DELAY_MS   = 1_000;
 
 // ── In-memory store ───────────────────────────────────────────────────────────
 
-const users      = new Map<string, User>();
+const users         = new Map<string, User>();
 const queues: Record<Mode, User[]> = { ranked: [], unranked: [] };
-const matches    = new Map<string, InternalGameState>();
-let matchCounter = 0;
+const matches       = new Map<string, InternalGameState>();
+const activeMatches = new Map<string, string>(); // userId → matchId
+let matchCounter    = 0;
 
 // bot state
 const botDifficulties = new Map<string, BotDifficulty>(); // matchId → difficulty
@@ -525,6 +526,77 @@ async function recordMatchEnd(
   return data as EndMatchResult | null; // null = duplicate call
 }
 
+function forfeitMatch(
+  state: InternalGameState,
+  loserId: string,
+  reason: "FORFEIT" | "DISCONNECT" | "TIMEOUT",
+): void {
+  if (state.ended) return;
+  state.ended = true;
+
+  const winnerId = state.players.find((p) => p.id !== loserId)!.id;
+  const winnerUsername = state.players.find((p) => p.id !== loserId)!.username;
+
+  // Clear all timers
+  const existingBotTimer = botTimers.get(state.matchId);
+  if (existingBotTimer) { clearTimeout(existingBotTimer); botTimers.delete(state.matchId); }
+  clearTurnTimer(state);
+  for (const dc of Object.values(state.disconnectedPlayers)) {
+    clearTimeout(dc.timer);
+  }
+  state.disconnectedPlayers = {};
+
+  // Clean up maps
+  matches.delete(state.matchId);
+  botDifficulties.delete(state.matchId);
+  for (const p of state.players) {
+    activeMatches.delete(p.id);
+  }
+
+  const matchId    = state.matchId;
+  const ranked     = state.mode === "ranked";
+  const isBotMatch = state.players.some((p) => p.id === BOT_ID);
+
+  if (isBotMatch) {
+    io.to(`match:${matchId}`).emit("match.ended", {
+      matchId,
+      winnerId,
+      winnerUsername,
+      ranked: false,
+      ratingDelta: null,
+      reason,
+    });
+    console.log(`[forfeit] bot match ended — reason=${reason} winner=${winnerUsername}`);
+    return;
+  }
+
+  (async () => {
+    let ratingDelta: Record<string, number> | null = null;
+    try {
+      const result = await recordMatchEnd(state, winnerId);
+      if (result === null) {
+        console.warn(`[forfeit] duplicate RPC call for ${matchId.slice(0, 8)}, skipping`);
+        return;
+      }
+      if (ranked) {
+        ratingDelta = { [state.players[0].id]: result.p1Delta, [state.players[1].id]: result.p2Delta };
+      }
+    } catch (err) {
+      console.error("[db] recordMatchEnd (forfeit) failed:", err);
+    }
+
+    io.to(`match:${matchId}`).emit("match.ended", {
+      matchId,
+      winnerId,
+      winnerUsername,
+      ranked,
+      ratingDelta,
+      reason,
+    });
+    console.log(`[forfeit] match ended — reason=${reason} winner=${winnerUsername} ranked=${ranked}`);
+  })();
+}
+
 function endHand(state: InternalGameState, winnerIndex: 0 | 1, reason: "FOLD" | "SHOWDOWN", showdownInfo?: HandResult["showdown"]): void {
   const loserIndex         = winnerIndex === 0 ? 1 : 0;
   const winner             = state.players[winnerIndex];
@@ -572,6 +644,9 @@ function endHand(state: InternalGameState, winnerIndex: 0 | 1, reason: "FOLD" | 
 
     // Remove from active matches immediately so no further actions are accepted.
     matches.delete(state.matchId);
+    for (const p of state.players) {
+      activeMatches.delete(p.id);
+    }
 
     // Clean up bot-specific state
     const existingBotTimer = botTimers.get(state.matchId);
@@ -646,6 +721,7 @@ function endHand(state: InternalGameState, winnerIndex: 0 | 1, reason: "FOLD" | 
 }
 
 function startNewHand(state: InternalGameState): void {
+  if (state.ended) return;
   const now  = new Date().toISOString();
   const deck = shuffle(newDeck());
   const [p0, p1] = state.players;
@@ -742,11 +818,15 @@ async function createMatch(p1: User, p2: User, mode: Mode, botDifficulty?: BotDi
     config,
     handStartStacks: {},
     playerElos:      { [p1.userId]: p1.elo, [p2.userId]: p2.elo },
-    turnDurationMs:  TURN_DURATION_MS,
-    turnDeadlineMs:  0, // set by startNewHand
+    turnDurationMs:         TURN_DURATION_MS,
+    turnDeadlineMs:         0, // set by startNewHand
+    consecutiveTimeouts:    { [p1.userId]: 0, [p2.userId]: 0 },
+    disconnectedPlayers:    {},
   };
 
   matches.set(matchId, state);
+  if (p1.userId !== BOT_ID) activeMatches.set(p1.userId, matchId);
+  if (p2.userId !== BOT_ID) activeMatches.set(p2.userId, matchId);
   if (botDifficulty) botDifficulties.set(matchId, botDifficulty);
 
   const room = `match:${matchId}`;
@@ -770,6 +850,7 @@ async function createMatch(p1: User, p2: User, mode: Mode, botDifficulty?: BotDi
 
 // New SB/dealer for next hand: rotate from previous dealer
 function startNextHand(state: InternalGameState): void {
+  if (state.ended) return;
   // Rotate dealer: whichever player was NOT dealer becomes the new dealer
   const newDealer = state.players.find((p) => p.id !== state.dealerId)!;
   state.dealerId  = newDealer.id;
@@ -800,6 +881,15 @@ setInterval(() => {
 
     const playerName = state.players.find((p) => p.id === playerId)?.username ?? playerId.slice(0, 8);
     console.log(`[timeout] match=${state.matchId.slice(0, 8)} player=${playerName} auto=${autoAction}`);
+
+    // Track consecutive timeouts for non-bot players
+    state.consecutiveTimeouts[playerId] = (state.consecutiveTimeouts[playerId] ?? 0) + 1;
+    const isBotMatch = state.players.some((p) => p.id === BOT_ID);
+    if (state.consecutiveTimeouts[playerId] >= 3 && !isBotMatch) {
+      console.log(`[timeout] player=${playerName} hit 3 consecutive timeouts — auto-forfeit`);
+      forfeitMatch(state, playerId, "TIMEOUT");
+      continue;
+    }
 
     applyAction(state, playerId, autoAction);
   }
@@ -833,12 +923,45 @@ io.on("connection", (socket: Socket) => {
       users.set(socket.id, user);
       console.log(`[auth] ${user.username} (${user.userId.slice(0, 8)}) elo=${user.elo}`);
       ack({ userId: user.userId, username: user.username, elo: user.elo });
+
+      // Reconnect to active match if one exists
+      const existingMatchId = activeMatches.get(verifiedId);
+      if (existingMatchId) {
+        const state = matches.get(existingMatchId);
+        if (state && !state.ended) {
+          state.socketIds[verifiedId] = socket.id;
+          socket.join(`match:${existingMatchId}`);
+
+          // Clear disconnect timer
+          const dc = state.disconnectedPlayers[verifiedId];
+          if (dc) {
+            clearTimeout(dc.timer);
+            delete state.disconnectedPlayers[verifiedId];
+          }
+          state.consecutiveTimeouts[verifiedId] = 0;
+
+          io.to(`match:${existingMatchId}`).emit("player.reconnected", {
+            userId: verifiedId,
+            username: user.username,
+          });
+
+          const opponentPlayer = state.players.find((p) => p.id !== verifiedId)!;
+          socket.emit("match.found", {
+            matchId: existingMatchId,
+            opponent: { userId: opponentPlayer.id, username: opponentPlayer.username },
+            mode: state.mode,
+          });
+          emitGameState(state);
+          console.log(`[reconnect] ${user.username} rejoined match ${existingMatchId.slice(0, 8)}`);
+        }
+      }
     },
   );
 
   socket.on("queue.join", ({ mode }: { mode?: Mode } = {}) => {
     const user      = users.get(socket.id);
     if (!user) return;
+    if (activeMatches.has(user.userId)) return; // prevent re-queuing during active match
     const queueMode: Mode = mode === "unranked" ? "unranked" : "ranked";
     const q = queues[queueMode];
     if (q.some((u) => u.userId === user.userId)) return;
@@ -905,6 +1028,9 @@ io.on("connection", (socket: Socket) => {
         return;
       }
 
+      // Reset consecutive timeout counter on manual action
+      state.consecutiveTimeouts[user.userId] = 0;
+
       // Apply
       console.log(
         `[action] match=${matchId.slice(0, 8)} player=${user.username}` +
@@ -935,6 +1061,15 @@ io.on("connection", (socket: Socket) => {
     },
   );
 
+  socket.on("game.forfeit", ({ matchId }: { matchId: string }) => {
+    const user = users.get(socket.id);
+    if (!user) return;
+    const state = matches.get(matchId);
+    if (!state) return;
+    if (!state.players.some((p) => p.id === user.userId)) return;
+    forfeitMatch(state, user.userId, "FORFEIT");
+  });
+
   socket.on("disconnect", () => {
     const user = users.get(socket.id);
     if (user) {
@@ -943,6 +1078,33 @@ io.on("connection", (socket: Socket) => {
         const idx = queues[m].findIndex((u) => u.userId === user.userId);
         if (idx !== -1) queues[m].splice(idx, 1);
       }
+
+      // Handle active match disconnect
+      const matchId = activeMatches.get(user.userId);
+      if (matchId) {
+        const state = matches.get(matchId);
+        if (state && !state.ended) {
+          const isBotMatch = state.players.some((p) => p.id === BOT_ID);
+          if (isBotMatch) {
+            forfeitMatch(state, user.userId, "DISCONNECT");
+          } else {
+            // 30s grace period for reconnection
+            const timer = setTimeout(() => {
+              delete state.disconnectedPlayers[user.userId];
+              if (!state.ended) {
+                forfeitMatch(state, user.userId, "DISCONNECT");
+              }
+            }, 30_000);
+            state.disconnectedPlayers[user.userId] = { since: Date.now(), timer };
+            io.to(`match:${matchId}`).emit("player.disconnected", {
+              userId: user.userId,
+              username: user.username,
+            });
+            console.log(`[disconnect] ${user.username} — 30s grace period started`);
+          }
+        }
+      }
+
       users.delete(socket.id);
       console.log(`[disconnect] ${user.username}`);
     }

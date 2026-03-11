@@ -90,6 +90,10 @@ export interface InternalGameState {
   turnDeadlineMs:  number;
   /** Set to true the moment match-end is triggered; prevents double-recording. */
   ended?:          boolean;
+  /** Per-player count of consecutive turn timeouts (auto-forfeit after 3). */
+  consecutiveTimeouts: Record<string, number>;
+  /** Tracks disconnected players and their 30s reconnection timers. */
+  disconnectedPlayers: Record<string, { since: number; timer: ReturnType<typeof setTimeout> }>;
 }
 
 // ── Hand result (broadcast after each hand ends) ─────────────────────────────

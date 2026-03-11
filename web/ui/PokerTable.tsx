@@ -27,6 +27,8 @@ interface Props {
   onCall?:       () => void;
   onRaise?:      (amount: number) => void;
   onReveal?:     (cards: string[]) => void;
+  onForfeit?:              () => void;
+  opponentDisconnectedAt?: number | null;
 }
 
 export function PokerTable({
@@ -38,11 +40,15 @@ export function PokerTable({
   onCall,
   onRaise,
   onReveal,
+  onForfeit,
+  opponentDisconnectedAt,
 }: Props) {
   const [, setTick] = useState(0);
   const handResultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showCheatSheet, setShowCheatSheet] = useState(false);
   const [pickingCard, setPickingCard] = useState(false);
+  const [forfeitConfirm, setForfeitConfirm] = useState(false);
+  const forfeitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 250ms interval: keeps the turn countdown ticking smoothly
   useEffect(() => {
@@ -186,6 +192,35 @@ export function PokerTable({
             {state.mode}
           </span>
           <button
+            onClick={() => {
+              if (forfeitConfirm) {
+                onForfeit?.();
+                setForfeitConfirm(false);
+                if (forfeitTimerRef.current) clearTimeout(forfeitTimerRef.current);
+              } else {
+                setForfeitConfirm(true);
+                forfeitTimerRef.current = setTimeout(() => setForfeitConfirm(false), 3000);
+              }
+            }}
+            style={{
+              background:    "transparent",
+              color:         forfeitConfirm ? "var(--danger)" : "var(--text3)",
+              border:        forfeitConfirm
+                ? "1px solid var(--danger)"
+                : "1px solid var(--border)",
+              borderRadius:  2,
+              padding:       "2px 8px",
+              fontSize:      9,
+              fontWeight:    700,
+              cursor:        "pointer",
+              fontFamily:    "monospace",
+              letterSpacing: 1,
+              textTransform: "uppercase",
+            }}
+          >
+            {forfeitConfirm ? "Confirm?" : "Forfeit"}
+          </button>
+          <button
             onClick={() => setShowCheatSheet(true)}
             title="Hand rankings"
             style={{
@@ -229,14 +264,36 @@ export function PokerTable({
           }}
         >
           {/* Opponent */}
-          <PlayerPanel
-            player={opponent}
-            isHero={false}
-            handResult={activeHandResult}
-            turnDeadlineMs={state.turnDeadlineMs}
-            revealedCards={opponentRevealedCards}
-            handCategory={opponentCategory}
-          />
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+            <PlayerPanel
+              player={opponent}
+              isHero={false}
+              handResult={activeHandResult}
+              turnDeadlineMs={state.turnDeadlineMs}
+              revealedCards={opponentRevealedCards}
+              handCategory={opponentCategory}
+            />
+            {opponentDisconnectedAt != null && (() => {
+              const remaining = Math.max(0, Math.ceil((opponentDisconnectedAt + 30_000 - Date.now()) / 1000));
+              return (
+                <div
+                  style={{
+                    background:       "var(--surface2)",
+                    border:           "1px solid var(--danger)",
+                    borderRadius:     3,
+                    padding:          "3px 10px",
+                    fontSize:         10,
+                    fontWeight:       700,
+                    color:            "var(--danger)",
+                    letterSpacing:    0.5,
+                    fontVariantNumeric: "tabular-nums",
+                  }}
+                >
+                  Disconnected — {remaining}s to reconnect
+                </div>
+              );
+            })()}
+          </div>
 
           {/* Board */}
           <div
