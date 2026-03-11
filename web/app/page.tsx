@@ -467,7 +467,6 @@ function RecentMatchesCard({ matches }: { matches: RecentMatch[] }) {
 function FriendsCard({
   friends,
   friendCode,
-  onlineUserIds,
   onChallenge,
   pendingChallenge,
   onAcceptChallenge,
@@ -476,7 +475,6 @@ function FriendsCard({
 }: {
   friends:            Friend[];
   friendCode:         string | null;
-  onlineUserIds:      Set<string>;
   onChallenge:        (friendId: string, mode: Mode) => void;
   pendingChallenge:   IncomingChallenge | null;
   onAcceptChallenge:  () => void;
@@ -485,7 +483,6 @@ function FriendsCard({
 }) {
   const [showLink, setShowLink] = useState(false);
   const [copied, setCopied]     = useState(false);
-  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
 
   const link = friendCode ? `riverrank.io/?friend=${friendCode}` : "";
 
@@ -615,9 +612,7 @@ function FriendsCard({
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", maxHeight: 300, overflowY: "auto" }}>
           {friends.map((f) => {
-            const isOnline    = onlineUserIds.has(f.id);
-            const isWaiting   = challengeWaiting === f.id;
-            const dropdownOpen = openDropdown === f.id;
+            const isWaiting = challengeWaiting === f.id;
             const flag = f.country && COUNTRY_MAP[f.country] ? COUNTRY_MAP[f.country].flag + " " : "";
 
             return (
@@ -633,17 +628,6 @@ function FriendsCard({
                   border:       "1px solid var(--border)",
                 }}
               >
-                {/* Online dot */}
-                <span
-                  style={{
-                    width:        6,
-                    height:       6,
-                    borderRadius: "50%",
-                    background:   isOnline ? "var(--success)" : "var(--text3)",
-                    opacity:      isOnline ? 1 : 0.4,
-                    flexShrink:   0,
-                  }}
-                />
                 {/* Name */}
                 <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {flag}{f.username}
@@ -656,13 +640,30 @@ function FriendsCard({
                 <span style={{ fontSize: 10, color: "var(--text3)", minWidth: 36, textAlign: "right" }}>
                   {f.wins}-{f.losses}
                 </span>
-                {/* Challenge button */}
-                <div style={{ position: "relative" }}>
-                  {isWaiting ? (
-                    <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600 }}>Waiting...</span>
-                  ) : (
+                {/* Challenge buttons */}
+                {isWaiting ? (
+                  <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600, whiteSpace: "nowrap" }}>Waiting...</span>
+                ) : (
+                  <div style={{ display: "flex", gap: 4 }}>
                     <button
-                      onClick={() => setOpenDropdown(dropdownOpen ? null : f.id)}
+                      onClick={() => onChallenge(f.id, "ranked")}
+                      style={{
+                        background:   "var(--primaryBtn)",
+                        color:        "var(--primaryBtnText)",
+                        border:       "none",
+                        borderRadius: 4,
+                        padding:      "0.2rem 0.45rem",
+                        fontSize:     10,
+                        fontFamily:   "monospace",
+                        fontWeight:   700,
+                        cursor:       "pointer",
+                        whiteSpace:   "nowrap",
+                      }}
+                    >
+                      Ranked
+                    </button>
+                    <button
+                      onClick={() => onChallenge(f.id, "unranked")}
                       style={{
                         background:   "transparent",
                         color:        "var(--primaryBtn)",
@@ -676,47 +677,10 @@ function FriendsCard({
                         whiteSpace:   "nowrap",
                       }}
                     >
-                      Challenge
+                      Casual
                     </button>
-                  )}
-                  {dropdownOpen && (
-                    <div
-                      style={{
-                        position:     "absolute",
-                        top:          "calc(100% + 4px)",
-                        right:        0,
-                        background:   "var(--surface)",
-                        border:       "1px solid var(--border)",
-                        borderRadius: 4,
-                        zIndex:       50,
-                        overflow:     "hidden",
-                        minWidth:     100,
-                      }}
-                    >
-                      {(["ranked", "unranked"] as Mode[]).map((m) => (
-                        <button
-                          key={m}
-                          onClick={() => { onChallenge(f.id, m); setOpenDropdown(null); }}
-                          style={{
-                            display:     "block",
-                            width:       "100%",
-                            background:  "transparent",
-                            border:      "none",
-                            borderBottom: m === "ranked" ? "1px solid var(--border)" : "none",
-                            color:       "var(--text2)",
-                            fontSize:    11,
-                            fontFamily:  "monospace",
-                            padding:     "8px 12px",
-                            textAlign:   "left",
-                            cursor:      "pointer",
-                          }}
-                        >
-                          {m === "ranked" ? "Ranked" : "Unranked"}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -1216,7 +1180,6 @@ function PageInner() {
   // Friends state
   const [friends, setFriends]                   = useState<Friend[]>([]);
   const [friendCode, setFriendCode]             = useState<string | null>(null);
-  const [onlineUserIds, setOnlineUserIds]       = useState<Set<string>>(new Set());
   const [pendingChallenge, setPendingChallenge] = useState<IncomingChallenge | null>(null);
   const [challengeWaiting, setChallengeWaiting] = useState<string | null>(null); // friendId while waiting
   const [friendToast, setFriendToast]           = useState<string | null>(null);
@@ -1344,6 +1307,30 @@ function PageInner() {
     })();
   }, [searchParams, session, profile?.username, fetchFriends, router]);
 
+  // Realtime subscription for incoming challenges (DB-backed delivery)
+  useEffect(() => {
+    if (!session) return;
+    const userId = session.user.id;
+
+    const channel = supabase
+      .channel("pending_challenges")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "pending_challenges", filter: `to_user_id=eq.${userId}` },
+        (payload) => {
+          const row = payload.new as { id: string; from_username: string; from_user_id: string; mode: Mode };
+          setPendingChallenge((prev) => {
+            // Don't overwrite if same challenge already shown via socket
+            if (prev?.challengeId === row.id) return prev;
+            return { challengeId: row.id, fromUsername: row.from_username, fromUserId: row.from_user_id, mode: row.mode };
+          });
+        },
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [session]);
+
   // Dashboard socket for challenges & online status
   useEffect(() => {
     if (!session || !profile?.username) return;
@@ -1356,24 +1343,14 @@ function PageInner() {
     dashboardSocketRef.current = socket;
 
     socket.on("connect", () => {
-      socket.emit(
-        "auth.guest",
-        { username: profile.username },
-        () => {
-          // Request online status of friends
-          if (friends.length > 0) {
-            socket.emit(
-              "friends.status",
-              { friendIds: friends.map((f) => f.id) },
-              (online: string[]) => setOnlineUserIds(new Set(online)),
-            );
-          }
-        },
-      );
+      socket.emit("auth.guest", { username: profile.username }, () => {});
     });
 
     socket.on("challenge.received", (data: IncomingChallenge) => {
-      setPendingChallenge(data);
+      setPendingChallenge((prev) => {
+        if (prev?.challengeId === data.challengeId) return prev;
+        return data;
+      });
     });
 
     socket.on("challenge.expired", () => {
@@ -1398,17 +1375,6 @@ function PageInner() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.access_token, profile?.username]);
 
-  // Refresh online status when friends list changes
-  useEffect(() => {
-    const socket = dashboardSocketRef.current;
-    if (!socket?.connected || friends.length === 0) return;
-    socket.emit(
-      "friends.status",
-      { friendIds: friends.map((f) => f.id) },
-      (online: string[]) => setOnlineUserIds(new Set(online)),
-    );
-  }, [friends]);
-
   function handleChallenge(friendId: string, mode: Mode) {
     const socket = dashboardSocketRef.current;
     if (!socket?.connected) return;
@@ -1427,12 +1393,14 @@ function PageInner() {
     const socket = dashboardSocketRef.current;
     if (!socket?.connected || !pendingChallenge) return;
     socket.emit("challenge.accept", { challengeId: pendingChallenge.challengeId });
+    supabase.from("pending_challenges").delete().eq("id", pendingChallenge.challengeId);
   }
 
   function handleDeclineChallenge() {
     const socket = dashboardSocketRef.current;
-    if (!socket?.connected || !pendingChallenge) return;
-    socket.emit("challenge.decline", { challengeId: pendingChallenge.challengeId });
+    if (!pendingChallenge) return;
+    if (socket?.connected) socket.emit("challenge.decline", { challengeId: pendingChallenge.challengeId });
+    supabase.from("pending_challenges").delete().eq("id", pendingChallenge.challengeId);
     setPendingChallenge(null);
   }
 
@@ -1712,7 +1680,6 @@ function PageInner() {
             <FriendsCard
               friends={friends}
               friendCode={friendCode}
-              onlineUserIds={onlineUserIds}
               onChallenge={handleChallenge}
               pendingChallenge={pendingChallenge}
               onAcceptChallenge={handleAcceptChallenge}

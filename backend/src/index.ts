@@ -1130,6 +1130,9 @@ io.on("connection", (socket: Socket) => {
       const timer = setTimeout(() => {
         pendingChallenges.delete(challengeId);
         socket.emit("challenge.expired", { challengeId });
+        supabaseAdmin.from("pending_challenges").delete().eq("id", challengeId).then(({ error }) => {
+          if (error) console.error("[challenge] db delete (expire) error:", error.message);
+        });
         console.log(`[challenge] expired ${challengeId.slice(0, 8)}`);
       }, 60_000);
 
@@ -1143,7 +1146,18 @@ io.on("connection", (socket: Socket) => {
       };
       pendingChallenges.set(challengeId, challenge);
 
-      // Find target socket and notify
+      // Persist to DB so Realtime delivers it even if target's socket is offline
+      supabaseAdmin.from("pending_challenges").insert({
+        id:            challengeId,
+        from_user_id:  user.userId,
+        to_user_id:    toUserId,
+        from_username: user.username,
+        mode,
+      }).then(({ error }) => {
+        if (error) console.error("[challenge] db insert error:", error.message);
+      });
+
+      // Also try instant socket delivery if target is connected
       for (const [, u] of users) {
         if (u.userId === toUserId) {
           const targetSocket = io.sockets.sockets.get(u.socketId);
@@ -1173,6 +1187,9 @@ io.on("connection", (socket: Socket) => {
 
       clearTimeout(challenge.timer);
       pendingChallenges.delete(challengeId);
+      supabaseAdmin.from("pending_challenges").delete().eq("id", challengeId).then(({ error }) => {
+        if (error) console.error("[challenge] db delete (accept) error:", error.message);
+      });
 
       // Refresh challenger's socket ID (may have reconnected)
       let challenger = challenge.fromUser;
@@ -1201,6 +1218,9 @@ io.on("connection", (socket: Socket) => {
 
       clearTimeout(challenge.timer);
       pendingChallenges.delete(challengeId);
+      supabaseAdmin.from("pending_challenges").delete().eq("id", challengeId).then(({ error }) => {
+        if (error) console.error("[challenge] db delete (decline) error:", error.message);
+      });
 
       // Notify challenger
       for (const [, u] of users) {
@@ -1229,6 +1249,9 @@ io.on("connection", (socket: Socket) => {
         if (challenge.fromUser.userId === user.userId) {
           clearTimeout(challenge.timer);
           pendingChallenges.delete(cid);
+          supabaseAdmin.from("pending_challenges").delete().eq("id", cid).then(({ error }) => {
+            if (error) console.error("[challenge] db delete (disconnect) error:", error.message);
+          });
           // Notify target
           for (const [, u] of users) {
             if (u.userId === challenge.toUserId) {
