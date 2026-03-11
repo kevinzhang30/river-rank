@@ -52,6 +52,17 @@ const botDifficulties = new Map<string, BotDifficulty>(); // matchId → difficu
 const botTimers       = new Map<string, ReturnType<typeof setTimeout>>(); // matchId → timer
 const queueTimers     = new Map<string, ReturnType<typeof setTimeout>>(); // userId → timer
 
+// challenges
+interface PendingChallenge {
+  id: string;
+  fromUser: User;
+  toUserId: string;
+  mode: Mode;
+  createdAt: number;
+  timer: ReturnType<typeof setTimeout>;
+}
+const pendingChallenges = new Map<string, PendingChallenge>(); // challengeId → challenge
+
 // ── Server setup ──────────────────────────────────────────────────────────────
 
 const app        = express();
@@ -1097,6 +1108,113 @@ io.on("connection", (socket: Socket) => {
     forfeitMatch(state, user.userId, "FORFEIT");
   });
 
+  // ── Friends & challenges ──────────────────────────────────────────────────
+
+  socket.on("friends.status", ({ friendIds }: { friendIds: string[] }, ack: (online: string[]) => void) => {
+    const online = friendIds.filter((id) =>
+      [...users.values()].some((u) => u.userId === id),
+    );
+    ack(online);
+  });
+
+  socket.on(
+    "challenge.create",
+    ({ toUserId, mode }: { toUserId: string; mode: Mode }, ack: (r: { challengeId?: string; error?: string }) => void) => {
+      const user = users.get(socket.id);
+      if (!user) return ack({ error: "not_authenticated" });
+      if (activeMatches.has(user.userId)) return ack({ error: "in_match" });
+
+      const challengeId = uuidv4();
+
+      // Auto-expire after 60s
+      const timer = setTimeout(() => {
+        pendingChallenges.delete(challengeId);
+        socket.emit("challenge.expired", { challengeId });
+        console.log(`[challenge] expired ${challengeId.slice(0, 8)}`);
+      }, 60_000);
+
+      const challenge: PendingChallenge = {
+        id: challengeId,
+        fromUser: user,
+        toUserId,
+        mode,
+        createdAt: Date.now(),
+        timer,
+      };
+      pendingChallenges.set(challengeId, challenge);
+
+      // Find target socket and notify
+      for (const [, u] of users) {
+        if (u.userId === toUserId) {
+          const targetSocket = io.sockets.sockets.get(u.socketId);
+          targetSocket?.emit("challenge.received", {
+            challengeId,
+            fromUsername: user.username,
+            fromUserId: user.userId,
+            mode,
+          });
+          break;
+        }
+      }
+
+      ack({ challengeId });
+      console.log(`[challenge] ${user.username} → ${toUserId.slice(0, 8)} mode=${mode} id=${challengeId.slice(0, 8)}`);
+    },
+  );
+
+  socket.on(
+    "challenge.accept",
+    ({ challengeId }: { challengeId: string }) => {
+      const user = users.get(socket.id);
+      if (!user) return;
+
+      const challenge = pendingChallenges.get(challengeId);
+      if (!challenge || challenge.toUserId !== user.userId) return;
+
+      clearTimeout(challenge.timer);
+      pendingChallenges.delete(challengeId);
+
+      // Refresh challenger's socket ID (may have reconnected)
+      let challenger = challenge.fromUser;
+      for (const [, u] of users) {
+        if (u.userId === challenger.userId) {
+          challenger = u;
+          break;
+        }
+      }
+
+      console.log(`[challenge] accepted ${challengeId.slice(0, 8)} — creating match`);
+      createMatch(challenger, user, challenge.mode).catch((err) =>
+        console.error("[match] challenge createMatch error:", err),
+      );
+    },
+  );
+
+  socket.on(
+    "challenge.decline",
+    ({ challengeId }: { challengeId: string }) => {
+      const user = users.get(socket.id);
+      if (!user) return;
+
+      const challenge = pendingChallenges.get(challengeId);
+      if (!challenge || challenge.toUserId !== user.userId) return;
+
+      clearTimeout(challenge.timer);
+      pendingChallenges.delete(challengeId);
+
+      // Notify challenger
+      for (const [, u] of users) {
+        if (u.userId === challenge.fromUser.userId) {
+          const challengerSocket = io.sockets.sockets.get(u.socketId);
+          challengerSocket?.emit("challenge.declined", { challengeId });
+          break;
+        }
+      }
+
+      console.log(`[challenge] declined ${challengeId.slice(0, 8)}`);
+    },
+  );
+
   socket.on("disconnect", () => {
     const user = users.get(socket.id);
     if (user) {
@@ -1104,6 +1222,21 @@ io.on("connection", (socket: Socket) => {
       for (const m of ["ranked", "unranked"] as Mode[]) {
         const idx = queues[m].findIndex((u) => u.userId === user.userId);
         if (idx !== -1) queues[m].splice(idx, 1);
+      }
+
+      // Clean up pending challenges where this user is the challenger
+      for (const [cid, challenge] of pendingChallenges) {
+        if (challenge.fromUser.userId === user.userId) {
+          clearTimeout(challenge.timer);
+          pendingChallenges.delete(cid);
+          // Notify target
+          for (const [, u] of users) {
+            if (u.userId === challenge.toUserId) {
+              io.sockets.sockets.get(u.socketId)?.emit("challenge.expired", { challengeId: cid });
+              break;
+            }
+          }
+        }
       }
 
       // Handle active match disconnect
