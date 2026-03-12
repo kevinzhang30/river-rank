@@ -233,9 +233,15 @@ export function PokerTable({
             <span
               style={{
                 background:    "transparent",
-                color:         state.mode === "ranked" ? "var(--primaryBtn)" : "var(--text3)",
+                color:         state.mode === "ranked"
+                  ? "var(--primaryBtn)"
+                  : state.mode === "bullet"
+                  ? "#F59E0B"
+                  : "var(--text3)",
                 border:        state.mode === "ranked"
                   ? "1px solid var(--primaryBtn)"
+                  : state.mode === "bullet"
+                  ? "1px solid #F59E0B"
                   : "1px solid var(--border)",
                 borderRadius:  2,
                 padding:       "2px 8px",

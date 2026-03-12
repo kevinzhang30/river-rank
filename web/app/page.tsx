@@ -201,7 +201,44 @@ function PlayCard({ onPlay }: { onPlay: (mode: Mode) => void }) {
           </span>
         </button>
         <p style={{ margin: 0, color: "var(--text3)", fontSize: 11, paddingTop: "0.25rem" }}>
-          Heads-up No-Limit Hold'em · Blinds increase every 3 hands
+          Heads-up No-Limit Hold'em · 20s turns · Blinds increase every ↑ 3 hands
+        </p>
+      </div>
+    </Card>
+  );
+}
+
+// ── Bullet play card ─────────────────────────────────────────────────────────
+
+function BulletPlayCard({ onPlay }: { onPlay: (mode: Mode) => void }) {
+  return (
+    <Card>
+      <CardLabel>Bullet</CardLabel>
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.65rem" }}>
+        <button
+          onClick={() => onPlay("bullet")}
+          style={{
+            background:    "transparent",
+            color:         "#14B8A6",
+            border:        "1px solid #14B8A6",
+            borderRadius:  4,
+            padding:       "0.8rem 1.25rem",
+            fontSize:      "0.95rem",
+            fontFamily:    "monospace",
+            fontWeight:    700,
+            cursor:        "pointer",
+            letterSpacing: 0.5,
+            width:         "100%",
+            textAlign:     "left",
+          }}
+        >
+          Play Bullet
+          <span style={{ float: "right", fontWeight: 400, fontSize: 11, opacity: 0.75 }}>
+            Just for fun
+          </span>
+        </button>
+        <p style={{ margin: 0, color: "var(--text3)", fontSize: 11, paddingTop: "0.25rem" }}>
+          Heads-up No-Limit Hold'em · 10s turns · Blinds ↑ every 2 hands
         </p>
       </div>
     </Card>
@@ -1692,6 +1729,7 @@ function PageInner() {
           <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
             {profile && <ProfileCard profile={profile} />}
             <PlayCard onPlay={(mode) => router.push(`/game?mode=${mode}`)} />
+            <BulletPlayCard onPlay={(mode) => router.push(`/game?mode=${mode}`)} />
             <div ref={settingsRef}>
               <AccountCard onSignOut={signOut} />
             </div>
