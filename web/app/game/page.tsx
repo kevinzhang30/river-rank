@@ -275,7 +275,7 @@ function GameView() {
           onForfeit={sendForfeit}
           opponentDisconnectedAt={opponentDisconnectedAt}
         />
-        <DebugPanel state={debugState} />
+        {process.env.NEXT_PUBLIC_DEBUG === "true" && <DebugPanel state={debugState} />}
 
         {matchResult && (
           <div
