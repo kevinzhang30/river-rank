@@ -80,3 +80,10 @@ input[type="number"] {
   --suit-h: #EF4444;  /* hearts   → red    */
   --suit-d: #F97316;  /* diamonds → orange */
 }
+
+/* ── Ready-button pulse ──────────────────────────────────────────────────── */
+
+@keyframes ready-pulse {
+  0%, 100% { box-shadow: 0 0 4px rgba(59, 91, 219, 0.4); }
+  50%      { box-shadow: 0 0 14px rgba(59, 91, 219, 0.7), 0 0 24px rgba(59, 91, 219, 0.3); }
+}

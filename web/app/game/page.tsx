@@ -42,12 +42,15 @@ function GameView() {
   const [opponent, setOpponent]           = useState<Opponent | null>(null);
   const [matchMode, setMatchMode]         = useState<Mode>(mode);
 
-  const [matchResult, setMatchResult]     = useState<{
+  type MatchResult = {
     winnerId:       string;
     winnerUsername: string;
     ratingDelta:    Record<string, number> | null;
     reason?:        string;
-  } | null>(null);
+  };
+
+  const [matchResult, setMatchResult]     = useState<MatchResult | null>(null);
+  const [pendingResult, setPendingResult] = useState<MatchResult | null>(null);
 
   const [queueStartMs, setQueueStartMs]   = useState<number | null>(null);
   const [queueTick, setQueueTick]         = useState(0);
@@ -145,7 +148,12 @@ function GameView() {
           ratingDelta:    Record<string, number> | null;
           reason?:        string;
         }) => {
-          setMatchResult({ winnerId, winnerUsername, ratingDelta: ratingDelta ?? null, reason });
+          const result = { winnerId, winnerUsername, ratingDelta: ratingDelta ?? null, reason };
+          if (reason === "FORFEIT" || reason === "DISCONNECT" || reason === "TIMEOUT") {
+            setMatchResult(result);
+          } else {
+            setPendingResult(result);
+          }
         },
       );
 
@@ -274,15 +282,18 @@ function GameView() {
           onReady={sendReady}
           onForfeit={sendForfeit}
           opponentDisconnectedAt={opponentDisconnectedAt}
+          pendingResult={pendingResult}
+          onViewResults={() => { setMatchResult(pendingResult); setPendingResult(null); }}
         />
-        <DebugPanel state={debugState} />
+        {process.env.NEXT_PUBLIC_DEBUG === "true" && <DebugPanel state={debugState} />}
 
         {matchResult && (
           <div
             style={{
               position:       "fixed",
               inset:          0,
-              background:     "rgba(0,0,0,0.72)",
+              background:     "rgba(0,0,0,0.5)",
+              backdropFilter: "blur(6px)",
               display:        "flex",
               alignItems:     "center",
               justifyContent: "center",
@@ -292,7 +303,7 @@ function GameView() {
             <div
               style={{
                 background:    "var(--surface)",
-                border:        `1px solid ${isWinner ? "var(--success)" : "var(--danger)"}`,
+                border:        "1px solid var(--border)",
                 borderRadius:  8,
                 padding:       isMobile ? "1.5rem 1.25rem" : "2.5rem 3rem",
                 textAlign:     "center",
@@ -347,8 +358,8 @@ function GameView() {
                 onClick={backToLobby}
                 style={{
                   background:    isWinner ? "var(--success)" : "transparent",
-                  color:         isWinner ? "var(--primaryBtnText)" : "var(--primaryBtn)",
-                  border:        isWinner ? "1px solid transparent" : "1px solid var(--primaryBtn)",
+                  color:         isWinner ? "var(--primaryBtnText)" : "var(--danger)",
+                  border:        isWinner ? "1px solid transparent" : "1px solid var(--danger)",
                   borderRadius:  4,
                   padding:       "0.65rem 1.25rem",
                   fontSize:      "0.9rem",

@@ -31,6 +31,8 @@ interface Props {
   onReady?:      () => void;
   onForfeit?:              () => void;
   opponentDisconnectedAt?: number | null;
+  pendingResult?: { winnerId: string; winnerUsername: string; ratingDelta: Record<string, number> | null; reason?: string } | null;
+  onViewResults?: () => void;
 }
 
 export function PokerTable({
@@ -45,6 +47,8 @@ export function PokerTable({
   onReady,
   onForfeit,
   opponentDisconnectedAt,
+  pendingResult,
+  onViewResults,
 }: Props) {
   const [, setTick] = useState(0);
   const handResultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -54,8 +58,9 @@ export function PokerTable({
   const forfeitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Pre-action state
-  type PreAction = "fold" | "check-call" | null;
+  type PreAction = "fold-check" | { type: "raise"; amount: number } | null;
   const [preAction, setPreAction] = useState<PreAction>(null);
+  const [preBetInvalid, setPreBetInvalid] = useState(false);
 
   // 250ms interval: keeps the turn countdown ticking smoothly
   useEffect(() => {
@@ -80,9 +85,17 @@ export function PokerTable({
     setPickingCard(false);
   }, [state.handResult?.handId]);
 
+  // Auto-clear preBetInvalid notice after 2s
+  useEffect(() => {
+    if (!preBetInvalid) return;
+    const t = setTimeout(() => setPreBetInvalid(false), 2000);
+    return () => clearTimeout(t);
+  }, [preBetInvalid]);
+
   // Clear pre-action on hand changes
   useEffect(() => {
     setPreAction(null);
+    setPreBetInvalid(false);
   }, [state.handNumber, state.handResult?.handId]);
 
   const activeHandResult: HandResult | null =
@@ -128,12 +141,21 @@ export function PokerTable({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!preAction || !hero.isToAct || hero.folded) return;
-    if (preAction === "fold") {
-      onFold?.();
-    } else if (preAction === "check-call") {
+
+    if (preAction === "fold-check") {
       if (legal?.canCheck) onCheck?.();
-      else if (legal?.canCall) onCall?.();
+      else onFold?.();
+    } else if (typeof preAction === "object" && preAction.type === "raise") {
+      const amt = preAction.amount;
+      const min = legal?.minRaiseTo;
+      const max = legal?.maxRaiseTo;
+      if (min !== undefined && max !== undefined && amt >= min && amt <= max) {
+        onRaise?.(amt);
+      } else {
+        setPreBetInvalid(true);
+      }
     }
+
     setPreAction(null);
   }, [hero.isToAct, preAction]);
 
@@ -341,7 +363,40 @@ export function PokerTable({
           >
             {/* Pot / Hand-complete */}
             <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: 1, textAlign: "center" }}>
-              {activeHandResult ? (
+              {pendingResult ? (
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                  <span
+                    style={{
+                      color:         pendingResult.winnerId === heroUserId ? "var(--success)" : "var(--danger)",
+                      fontWeight:    800,
+                      fontSize:      15,
+                      letterSpacing: 1.5,
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {pendingResult.winnerId === heroUserId ? "You Win" : "You Lose"}
+                  </span>
+                  <button
+                    onClick={() => onViewResults?.()}
+                    style={{
+                      background:    "var(--primaryBtn)",
+                      color:         "var(--primaryBtnText)",
+                      border:        "1px solid var(--primaryBtn)",
+                      borderRadius:  4,
+                      padding:       "6px 18px",
+                      fontSize:      11,
+                      fontWeight:    700,
+                      cursor:        "pointer",
+                      fontFamily:    "monospace",
+                      letterSpacing: 1,
+                      textTransform: "uppercase",
+                      animation:     "ready-pulse 2s ease-in-out infinite",
+                    }}
+                  >
+                    View Results
+                  </button>
+                </div>
+              ) : activeHandResult ? (
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
                   <span style={{ color: "var(--text3)", fontSize: 9, letterSpacing: 2 }}>
                     HAND COMPLETE
@@ -361,17 +416,18 @@ export function PokerTable({
                           <button
                             onClick={() => onReady?.()}
                             style={{
-                              background:    "transparent",
-                              color:         "var(--text2)",
-                              border:        "1px solid var(--border)",
-                              borderRadius:  3,
-                              padding:       "4px 14px",
-                              fontSize:      10,
+                              background:    "var(--primaryBtn)",
+                              color:         "var(--primaryBtnText)",
+                              border:        "1px solid var(--primaryBtn)",
+                              borderRadius:  4,
+                              padding:       "6px 18px",
+                              fontSize:      11,
                               fontWeight:    700,
                               cursor:        "pointer",
                               fontFamily:    "monospace",
                               letterSpacing: 1,
                               textTransform: "uppercase",
+                              animation:     "ready-pulse 2s ease-in-out infinite",
                             }}
                           >
                             Ready
@@ -524,6 +580,7 @@ export function PokerTable({
         preAction={preAction}
         onPreAction={setPreAction}
         showPreActions={showPreActions}
+        preBetInvalid={preBetInvalid}
       />
 
       {showCheatSheet && <HandCheatSheet onClose={() => setShowCheatSheet(false)} />}

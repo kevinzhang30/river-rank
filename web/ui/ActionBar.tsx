@@ -32,6 +32,11 @@ function ActionButton({ label, variant, disabled = false, onClick, small = false
       color:      "var(--primaryBtn)",
       border:     "2px solid var(--primaryBtn)",
     },
+    raise: {
+      background: "rgba(34, 197, 94, 0.15)",
+      color:      "var(--success)",
+      border:     "2px solid var(--success)",
+    },
   };
 
   const variantStyle: Record<BtnVariant, React.CSSProperties> = {
@@ -104,12 +109,13 @@ interface Props {
   onCheck?: () => void;
   onCall?:  () => void;
   onRaise?: (amount: number) => void;
-  preAction?:      "fold" | "check-call" | null;
-  onPreAction?:    (action: "fold" | "check-call" | null) => void;
+  preAction?:      "fold-check" | { type: "raise"; amount: number } | null;
+  onPreAction?:    (action: "fold-check" | { type: "raise"; amount: number } | null) => void;
   showPreActions?: boolean;
+  preBetInvalid?:  boolean;
 }
 
-export function ActionBar({ legal, pot, bigBlind, onFold, onCheck, onCall, onRaise, preAction, onPreAction, showPreActions }: Props) {
+export function ActionBar({ legal, pot, bigBlind, onFold, onCheck, onCall, onRaise, preAction, onPreAction, showPreActions, preBetInvalid }: Props) {
   const isMobile = useIsMobile();
   const [rawInput, setRawInput] = useState("");
 
@@ -155,32 +161,104 @@ export function ActionBar({ legal, pot, bigBlind, onFold, onCheck, onCall, onRai
     <div style={{ width: 1, alignSelf: "stretch", background: "var(--border)", margin: "0 2px" }} />
   );
 
+  // Pre-bet input state (local to pre-action mode)
+  const [preBetInput, setPreBetInput] = useState("");
+  const preBetParsed = parseInt(preBetInput, 10);
+  const preBetValid  = !isNaN(preBetParsed) && preBetParsed > 0;
+  const hasPreBet    = typeof preAction === "object" && preAction !== null && preAction.type === "raise";
+
   if (showPreActions && !isActive) {
     return (
       <div
         style={{
-          background: "var(--surface)",
-          borderTop:  "1px solid var(--border)",
-          flexShrink: 0,
-          padding:    isMobile ? "10px 10px" : "14px 20px",
-          display:    "flex",
-          gap:        8,
+          background:    "var(--surface)",
+          borderTop:     "1px solid var(--border)",
+          flexShrink:    0,
+          padding:       isMobile ? "8px 10px 10px" : "10px 20px 12px",
+          display:       "flex",
+          flexDirection: "row",
+          gap:           6,
+          alignItems:    "center",
         }}
       >
+        {/* Fold / Check toggle */}
         <ActionButton
-          label="Pre-Fold"
+          label="Fold / Check"
           variant="fold"
-          active={preAction === "fold"}
-          onClick={() => onPreAction?.(preAction === "fold" ? null : "fold")}
+          active={preAction === "fold-check"}
+          onClick={() => {
+            setPreBetInput("");
+            onPreAction?.(preAction === "fold-check" ? null : "fold-check");
+          }}
           flex={1}
         />
-        <ActionButton
-          label="Check / Call"
-          variant="call"
-          active={preAction === "check-call"}
-          onClick={() => onPreAction?.(preAction === "check-call" ? null : "check-call")}
-          flex={1}
-        />
+
+        {/* Pre-bet input + button, or invalidation notice */}
+        {preBetInvalid ? (
+          <div
+            style={{
+              flex:          1,
+              height:        34,
+              display:       "flex",
+              alignItems:    "center",
+              justifyContent: "center",
+              fontSize:      10,
+              fontWeight:    700,
+              letterSpacing: 1.5,
+              color:         "var(--danger)",
+              textTransform: "uppercase",
+            }}
+          >
+            PRE-BET INVALIDATED
+          </div>
+        ) : (
+          <div style={{ flex: 1, display: "flex", gap: 6, alignItems: "center" }}>
+            <input
+              type="number"
+              placeholder="Amount"
+              value={hasPreBet ? "" : preBetInput}
+              disabled={hasPreBet}
+              onChange={(e) => setPreBetInput(e.target.value)}
+              onFocus={(e) => e.target.select()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && preBetValid) {
+                  onPreAction?.({ type: "raise", amount: preBetParsed });
+                  setPreBetInput("");
+                }
+              }}
+              style={{
+                width:        isMobile ? 64 : 80,
+                height:       34,
+                background:   hasPreBet ? "var(--surface)" : "var(--surface2)",
+                border:       "1px solid var(--border)",
+                borderRadius: 3,
+                color:        hasPreBet ? "var(--text3)" : "var(--text)",
+                fontSize:     13,
+                fontFamily:   "monospace",
+                fontWeight:   600,
+                padding:      "0 8px",
+                outline:      "none",
+                textAlign:    "right",
+              }}
+            />
+            <ActionButton
+              label={hasPreBet ? `Pre-Raise $${(preAction as { type: "raise"; amount: number }).amount}` : preBetValid ? `Pre-Raise $${preBetParsed}` : "Pre-Raise"}
+              variant="raise"
+              active={hasPreBet}
+              disabled={!hasPreBet && !preBetValid}
+              onClick={() => {
+                if (hasPreBet) {
+                  // Cancel pre-bet
+                  onPreAction?.(null);
+                } else if (preBetValid) {
+                  onPreAction?.({ type: "raise", amount: preBetParsed });
+                  setPreBetInput("");
+                }
+              }}
+              flex={1}
+            />
+          </div>
+        )}
       </div>
     );
   }
