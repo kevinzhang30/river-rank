@@ -325,7 +325,7 @@ function resolveShowdown(state: InternalGameState): void {
       pot:          chopPot,
       deltas:       chopDeltas,
       reason:       "SHOWDOWN",
-      showUntilMs:  Date.now() + 7_000,
+      showUntilMs:  Date.now() + 10_000,
       showdown:     showdownInfo,
       reveals:      {},
     };
@@ -634,7 +634,7 @@ function endHand(state: InternalGameState, winnerIndex: 0 | 1, reason: "FOLD" | 
     pot:          winAmount,
     deltas,
     reason,
-    showUntilMs:  Date.now() + 7_000,
+    showUntilMs:  Date.now() + 10_000,
     showdown:     showdownInfo,
     reveals:      {},
   };
@@ -929,11 +929,26 @@ io.on("connection", (socket: Socket) => {
       // socket.data.user is guaranteed set by the JWT middleware
       const verifiedId = socket.data.user.id as string;
       const trimmed    = username.trim() || "Guest";
-      const dbUser     = await prisma.user.upsert({
-        where:  { id: verifiedId },
-        update: { username: trimmed },
-        create: { id: verifiedId, username: trimmed },
-      });
+      let dbUser;
+      try {
+        dbUser = await prisma.user.upsert({
+          where:  { id: verifiedId },
+          update: { username: trimmed },
+          create: { id: verifiedId, username: trimmed },
+        });
+      } catch (e: any) {
+        if (e?.code === "P2002") {
+          // Username taken — fall back to username + random suffix
+          const fallback = `${trimmed}#${Math.floor(Math.random() * 9000 + 1000)}`;
+          dbUser = await prisma.user.upsert({
+            where:  { id: verifiedId },
+            update: { username: fallback },
+            create: { id: verifiedId, username: fallback },
+          });
+        } else {
+          throw e;
+        }
+      }
       const user: User = {
         userId:   verifiedId,
         username: dbUser.username,

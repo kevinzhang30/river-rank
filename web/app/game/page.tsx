@@ -148,7 +148,12 @@ function GameView() {
           ratingDelta:    Record<string, number> | null;
           reason?:        string;
         }) => {
-          setPendingResult({ winnerId, winnerUsername, ratingDelta: ratingDelta ?? null, reason });
+          const result = { winnerId, winnerUsername, ratingDelta: ratingDelta ?? null, reason };
+          if (reason === "FORFEIT" || reason === "DISCONNECT" || reason === "TIMEOUT") {
+            setMatchResult(result);
+          } else {
+            setPendingResult(result);
+          }
         },
       );
 
@@ -263,7 +268,6 @@ function GameView() {
 
   if (tableState && userId) {
     const isWinner = matchResult?.winnerId === userId;
-    const isPendingWinner = pendingResult?.winnerId === userId;
     return (
       <>
         <PokerTable
@@ -278,67 +282,18 @@ function GameView() {
           onReady={sendReady}
           onForfeit={sendForfeit}
           opponentDisconnectedAt={opponentDisconnectedAt}
+          pendingResult={pendingResult}
+          onViewResults={() => { setMatchResult(pendingResult); setPendingResult(null); }}
         />
         {process.env.NEXT_PUBLIC_DEBUG === "true" && <DebugPanel state={debugState} />}
-
-        {pendingResult && !matchResult && (
-          <div
-            style={{
-              position:       "fixed",
-              bottom:         0,
-              left:           0,
-              right:          0,
-              background:     "rgba(0,0,0,0.82)",
-              backdropFilter: "blur(6px)",
-              display:        "flex",
-              alignItems:     "center",
-              justifyContent: "center",
-              gap:            "1rem",
-              padding:        "1rem 1.5rem",
-              zIndex:         90,
-              fontFamily:     "monospace",
-            }}
-          >
-            <span
-              style={{
-                fontSize:      16,
-                fontWeight:    800,
-                letterSpacing: 1.5,
-                textTransform: "uppercase",
-                color:         isPendingWinner ? "var(--success)" : "var(--danger)",
-              }}
-            >
-              {isPendingWinner ? "You Win" : "You Lose"}
-            </span>
-            <button
-              onClick={() => {
-                setMatchResult(pendingResult);
-                setPendingResult(null);
-              }}
-              style={{
-                background:    isPendingWinner ? "var(--success)" : "transparent",
-                color:         isPendingWinner ? "var(--primaryBtnText)" : "var(--primaryBtn)",
-                border:        isPendingWinner ? "1px solid transparent" : "1px solid var(--primaryBtn)",
-                borderRadius:  4,
-                padding:       "0.5rem 1.1rem",
-                fontSize:      "0.85rem",
-                fontFamily:    "monospace",
-                fontWeight:    700,
-                cursor:        "pointer",
-                letterSpacing: 0.3,
-              }}
-            >
-              View Results
-            </button>
-          </div>
-        )}
 
         {matchResult && (
           <div
             style={{
               position:       "fixed",
               inset:          0,
-              background:     "rgba(0,0,0,0.72)",
+              background:     "rgba(0,0,0,0.5)",
+              backdropFilter: "blur(6px)",
               display:        "flex",
               alignItems:     "center",
               justifyContent: "center",
@@ -348,7 +303,7 @@ function GameView() {
             <div
               style={{
                 background:    "var(--surface)",
-                border:        `1px solid ${isWinner ? "var(--success)" : "var(--danger)"}`,
+                border:        "1px solid var(--border)",
                 borderRadius:  8,
                 padding:       isMobile ? "1.5rem 1.25rem" : "2.5rem 3rem",
                 textAlign:     "center",
@@ -403,8 +358,8 @@ function GameView() {
                 onClick={backToLobby}
                 style={{
                   background:    isWinner ? "var(--success)" : "transparent",
-                  color:         isWinner ? "var(--primaryBtnText)" : "var(--primaryBtn)",
-                  border:        isWinner ? "1px solid transparent" : "1px solid var(--primaryBtn)",
+                  color:         isWinner ? "var(--primaryBtnText)" : "var(--danger)",
+                  border:        isWinner ? "1px solid transparent" : "1px solid var(--danger)",
                   borderRadius:  4,
                   padding:       "0.65rem 1.25rem",
                   fontSize:      "0.9rem",

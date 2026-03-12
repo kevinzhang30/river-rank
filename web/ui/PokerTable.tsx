@@ -31,6 +31,8 @@ interface Props {
   onReady?:      () => void;
   onForfeit?:              () => void;
   opponentDisconnectedAt?: number | null;
+  pendingResult?: { winnerId: string; winnerUsername: string; ratingDelta: Record<string, number> | null; reason?: string } | null;
+  onViewResults?: () => void;
 }
 
 export function PokerTable({
@@ -45,6 +47,8 @@ export function PokerTable({
   onReady,
   onForfeit,
   opponentDisconnectedAt,
+  pendingResult,
+  onViewResults,
 }: Props) {
   const [, setTick] = useState(0);
   const handResultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -359,7 +363,40 @@ export function PokerTable({
           >
             {/* Pot / Hand-complete */}
             <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: 1, textAlign: "center" }}>
-              {activeHandResult ? (
+              {pendingResult ? (
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                  <span
+                    style={{
+                      color:         pendingResult.winnerId === heroUserId ? "var(--success)" : "var(--danger)",
+                      fontWeight:    800,
+                      fontSize:      15,
+                      letterSpacing: 1.5,
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {pendingResult.winnerId === heroUserId ? "You Win" : "You Lose"}
+                  </span>
+                  <button
+                    onClick={() => onViewResults?.()}
+                    style={{
+                      background:    "var(--primaryBtn)",
+                      color:         "var(--primaryBtnText)",
+                      border:        "1px solid var(--primaryBtn)",
+                      borderRadius:  4,
+                      padding:       "6px 18px",
+                      fontSize:      11,
+                      fontWeight:    700,
+                      cursor:        "pointer",
+                      fontFamily:    "monospace",
+                      letterSpacing: 1,
+                      textTransform: "uppercase",
+                      animation:     "ready-pulse 2s ease-in-out infinite",
+                    }}
+                  >
+                    View Results
+                  </button>
+                </div>
+              ) : activeHandResult ? (
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
                   <span style={{ color: "var(--text3)", fontSize: 9, letterSpacing: 2 }}>
                     HAND COMPLETE
@@ -379,17 +416,18 @@ export function PokerTable({
                           <button
                             onClick={() => onReady?.()}
                             style={{
-                              background:    "transparent",
-                              color:         "var(--text2)",
-                              border:        "1px solid var(--border)",
-                              borderRadius:  3,
-                              padding:       "4px 14px",
-                              fontSize:      10,
+                              background:    "var(--primaryBtn)",
+                              color:         "var(--primaryBtnText)",
+                              border:        "1px solid var(--primaryBtn)",
+                              borderRadius:  4,
+                              padding:       "6px 18px",
+                              fontSize:      11,
                               fontWeight:    700,
                               cursor:        "pointer",
                               fontFamily:    "monospace",
                               letterSpacing: 1,
                               textTransform: "uppercase",
+                              animation:     "ready-pulse 2s ease-in-out infinite",
                             }}
                           >
                             Ready

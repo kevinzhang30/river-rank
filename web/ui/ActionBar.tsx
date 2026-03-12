@@ -176,11 +176,12 @@ export function ActionBar({ legal, pot, bigBlind, onFold, onCheck, onCall, onRai
           flexShrink:    0,
           padding:       isMobile ? "8px 10px 10px" : "10px 20px 12px",
           display:       "flex",
-          flexDirection: "column",
-          gap:           8,
+          flexDirection: "row",
+          gap:           6,
+          alignItems:    "center",
         }}
       >
-        {/* Row 1: Fold / Check toggle */}
+        {/* Fold / Check toggle */}
         <ActionButton
           label="Fold / Check"
           variant="fold"
@@ -192,10 +193,11 @@ export function ActionBar({ legal, pot, bigBlind, onFold, onCheck, onCall, onRai
           flex={1}
         />
 
-        {/* Row 2: Pre-bet input + button, or invalidation notice */}
+        {/* Pre-bet input + button, or invalidation notice */}
         {preBetInvalid ? (
           <div
             style={{
+              flex:          1,
               height:        34,
               display:       "flex",
               alignItems:    "center",
@@ -210,7 +212,7 @@ export function ActionBar({ legal, pot, bigBlind, onFold, onCheck, onCall, onRai
             PRE-BET INVALIDATED
           </div>
         ) : (
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <div style={{ flex: 1, display: "flex", gap: 6, alignItems: "center" }}>
             <input
               type="number"
               placeholder="Amount"
