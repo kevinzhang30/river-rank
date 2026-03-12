@@ -201,7 +201,7 @@ function PlayCard({ onPlay }: { onPlay: (mode: Mode) => void }) {
           </span>
         </button>
         <p style={{ margin: 0, color: "var(--text3)", fontSize: 11, paddingTop: "0.25rem" }}>
-          Heads-up No-Limit Hold'em · 20s turns · Blinds increase every ↑ 3 hands
+          Heads-up No-Limit Hold'em · 20s turns · Blinds ↑ every  3 hands
         </p>
       </div>
     </Card>
