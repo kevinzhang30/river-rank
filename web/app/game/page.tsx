@@ -42,12 +42,15 @@ function GameView() {
   const [opponent, setOpponent]           = useState<Opponent | null>(null);
   const [matchMode, setMatchMode]         = useState<Mode>(mode);
 
-  const [matchResult, setMatchResult]     = useState<{
+  type MatchResult = {
     winnerId:       string;
     winnerUsername: string;
     ratingDelta:    Record<string, number> | null;
     reason?:        string;
-  } | null>(null);
+  };
+
+  const [matchResult, setMatchResult]     = useState<MatchResult | null>(null);
+  const [pendingResult, setPendingResult] = useState<MatchResult | null>(null);
 
   const [queueStartMs, setQueueStartMs]   = useState<number | null>(null);
   const [queueTick, setQueueTick]         = useState(0);
@@ -145,7 +148,7 @@ function GameView() {
           ratingDelta:    Record<string, number> | null;
           reason?:        string;
         }) => {
-          setMatchResult({ winnerId, winnerUsername, ratingDelta: ratingDelta ?? null, reason });
+          setPendingResult({ winnerId, winnerUsername, ratingDelta: ratingDelta ?? null, reason });
         },
       );
 
@@ -260,6 +263,7 @@ function GameView() {
 
   if (tableState && userId) {
     const isWinner = matchResult?.winnerId === userId;
+    const isPendingWinner = pendingResult?.winnerId === userId;
     return (
       <>
         <PokerTable
@@ -276,6 +280,58 @@ function GameView() {
           opponentDisconnectedAt={opponentDisconnectedAt}
         />
         {process.env.NEXT_PUBLIC_DEBUG === "true" && <DebugPanel state={debugState} />}
+
+        {pendingResult && !matchResult && (
+          <div
+            style={{
+              position:       "fixed",
+              bottom:         0,
+              left:           0,
+              right:          0,
+              background:     "rgba(0,0,0,0.82)",
+              backdropFilter: "blur(6px)",
+              display:        "flex",
+              alignItems:     "center",
+              justifyContent: "center",
+              gap:            "1rem",
+              padding:        "1rem 1.5rem",
+              zIndex:         90,
+              fontFamily:     "monospace",
+            }}
+          >
+            <span
+              style={{
+                fontSize:      16,
+                fontWeight:    800,
+                letterSpacing: 1.5,
+                textTransform: "uppercase",
+                color:         isPendingWinner ? "var(--success)" : "var(--danger)",
+              }}
+            >
+              {isPendingWinner ? "You Win" : "You Lose"}
+            </span>
+            <button
+              onClick={() => {
+                setMatchResult(pendingResult);
+                setPendingResult(null);
+              }}
+              style={{
+                background:    isPendingWinner ? "var(--success)" : "transparent",
+                color:         isPendingWinner ? "var(--primaryBtnText)" : "var(--primaryBtn)",
+                border:        isPendingWinner ? "1px solid transparent" : "1px solid var(--primaryBtn)",
+                borderRadius:  4,
+                padding:       "0.5rem 1.1rem",
+                fontSize:      "0.85rem",
+                fontFamily:    "monospace",
+                fontWeight:    700,
+                cursor:        "pointer",
+                letterSpacing: 0.3,
+              }}
+            >
+              View Results
+            </button>
+          </div>
+        )}
 
         {matchResult && (
           <div

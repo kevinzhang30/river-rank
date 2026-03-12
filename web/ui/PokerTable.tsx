@@ -54,8 +54,9 @@ export function PokerTable({
   const forfeitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Pre-action state
-  type PreAction = "fold" | "check-call" | null;
+  type PreAction = "fold-check" | { type: "raise"; amount: number } | null;
   const [preAction, setPreAction] = useState<PreAction>(null);
+  const [preBetInvalid, setPreBetInvalid] = useState(false);
 
   // 250ms interval: keeps the turn countdown ticking smoothly
   useEffect(() => {
@@ -80,9 +81,17 @@ export function PokerTable({
     setPickingCard(false);
   }, [state.handResult?.handId]);
 
+  // Auto-clear preBetInvalid notice after 2s
+  useEffect(() => {
+    if (!preBetInvalid) return;
+    const t = setTimeout(() => setPreBetInvalid(false), 2000);
+    return () => clearTimeout(t);
+  }, [preBetInvalid]);
+
   // Clear pre-action on hand changes
   useEffect(() => {
     setPreAction(null);
+    setPreBetInvalid(false);
   }, [state.handNumber, state.handResult?.handId]);
 
   const activeHandResult: HandResult | null =
@@ -128,12 +137,21 @@ export function PokerTable({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!preAction || !hero.isToAct || hero.folded) return;
-    if (preAction === "fold") {
-      onFold?.();
-    } else if (preAction === "check-call") {
+
+    if (preAction === "fold-check") {
       if (legal?.canCheck) onCheck?.();
-      else if (legal?.canCall) onCall?.();
+      else onFold?.();
+    } else if (typeof preAction === "object" && preAction.type === "raise") {
+      const amt = preAction.amount;
+      const min = legal?.minRaiseTo;
+      const max = legal?.maxRaiseTo;
+      if (min !== undefined && max !== undefined && amt >= min && amt <= max) {
+        onRaise?.(amt);
+      } else {
+        setPreBetInvalid(true);
+      }
     }
+
     setPreAction(null);
   }, [hero.isToAct, preAction]);
 
@@ -524,6 +542,7 @@ export function PokerTable({
         preAction={preAction}
         onPreAction={setPreAction}
         showPreActions={showPreActions}
+        preBetInvalid={preBetInvalid}
       />
 
       {showCheatSheet && <HandCheatSheet onClose={() => setShowCheatSheet(false)} />}
