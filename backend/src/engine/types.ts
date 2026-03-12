@@ -4,7 +4,7 @@
 export type Card = string;
 
 export type GameStreet = "PREFLOP" | "FLOP" | "TURN" | "RIVER" | "SHOWDOWN";
-export type Mode       = "ranked"  | "unranked";
+export type Mode       = "ranked"  | "unranked" | "bullet";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -23,6 +23,14 @@ export const DEFAULT_CONFIG: GameConfig = {
   smallBlind:                 10,
   bigBlind:                   20,
   blindIncreaseIntervalHands: 3,
+  blindIncreaseFactor:        1.5,
+};
+
+export const BULLET_CONFIG: GameConfig = {
+  startingStack:              1000,
+  smallBlind:                 10,
+  bigBlind:                   20,
+  blindIncreaseIntervalHands: 2,
   blindIncreaseFactor:        1.5,
 };
 

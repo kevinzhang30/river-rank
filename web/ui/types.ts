@@ -1,5 +1,5 @@
 export type Street = "preflop" | "flop" | "turn" | "river" | "showdown";
-export type Mode = "ranked" | "unranked";
+export type Mode = "ranked" | "unranked" | "bullet";
 
 export interface PublicPlayer {
   userId:   string;

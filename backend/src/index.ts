@@ -3,7 +3,7 @@ import { createServer } from "http";
 import { Server, Socket } from "socket.io";
 import { v4 as uuidv4 } from "uuid";
 
-import { DEFAULT_CONFIG } from "./engine/types";
+import { DEFAULT_CONFIG, BULLET_CONFIG } from "./engine/types";
 import type {
   InternalGameState,
   PlayerState,
@@ -37,12 +37,13 @@ const BOT_QUEUE_TIMEOUT_MS = 20_000;
 // ── Turn timer ────────────────────────────────────────────────────────────────
 
 const TURN_DURATION_MS         = 15_000;
+const BULLET_TURN_DURATION_MS  = 10_000;
 const RUNOUT_STREET_DELAY_MS   = 1_000;
 
 // ── In-memory store ───────────────────────────────────────────────────────────
 
 const users         = new Map<string, User>();
-const queues: Record<Mode, User[]> = { ranked: [], unranked: [] };
+const queues: Record<Mode, User[]> = { ranked: [], unranked: [], bullet: [] };
 const matches       = new Map<string, InternalGameState>();
 const activeMatches = new Map<string, string>(); // userId → matchId
 let matchCounter    = 0;
@@ -107,6 +108,7 @@ function makeBotUser(): User {
 
 function getBotDifficulty(mode: Mode, elo: number): BotDifficulty {
   if (mode === "unranked") return "easy";
+  // Bullet uses ELO-based scaling like ranked
   if (elo < 1100) return "easy";
   if (elo <= 1300) return "medium";
   return "hard";
@@ -531,7 +533,7 @@ async function recordMatchEnd(
     p_p1:       p1,
     p_p2:       p2,
     p_winner:   winnerUserId,
-    p_ranked:   state.mode === "ranked",
+    p_ranked:   state.mode === "ranked",  // bullet is unranked
   });
 
   if (error) throw error;
@@ -799,7 +801,8 @@ function startNewHand(state: InternalGameState): void {
 
 async function createMatch(p1: User, p2: User, mode: Mode, botDifficulty?: BotDifficulty): Promise<void> {
   const matchId = uuidv4();
-  const config  = DEFAULT_CONFIG;
+  const config  = mode === "bullet" ? BULLET_CONFIG : DEFAULT_CONFIG;
+  const turnDurationMs = mode === "bullet" ? BULLET_TURN_DURATION_MS : TURN_DURATION_MS;
 
   // Alternate who starts as dealer across matches
   const [sbUser, bbUser] = matchCounter++ % 2 === 0 ? [p1, p2] : [p2, p1];
@@ -833,7 +836,7 @@ async function createMatch(p1: User, p2: User, mode: Mode, botDifficulty?: BotDi
     config,
     handStartStacks: {},
     playerElos:      { [p1.userId]: p1.elo, [p2.userId]: p2.elo },
-    turnDurationMs:         TURN_DURATION_MS,
+    turnDurationMs:         turnDurationMs,
     turnDeadlineMs:         0, // set by startNewHand
     consecutiveTimeouts:    { [p1.userId]: 0, [p2.userId]: 0 },
     disconnectedPlayers:    {},
@@ -998,7 +1001,7 @@ io.on("connection", (socket: Socket) => {
     const user      = users.get(socket.id);
     if (!user) return;
     if (activeMatches.has(user.userId)) return; // prevent re-queuing during active match
-    const queueMode: Mode = mode === "unranked" ? "unranked" : "ranked";
+    const queueMode: Mode = mode === "unranked" ? "unranked" : mode === "bullet" ? "bullet" : "ranked";
     const q = queues[queueMode];
     if (q.some((u) => u.userId === user.userId)) return;
     q.push(user);
@@ -1019,7 +1022,8 @@ io.on("connection", (socket: Socket) => {
         q.splice(idx, 1);
         const difficulty = getBotDifficulty(queueMode, user.elo);
         console.log(`[queue:${queueMode}] ${user.username} timed out — matching with bot (${difficulty})`);
-        createMatch(user, makeBotUser(), "unranked", difficulty).catch((err) =>
+        const botMode = queueMode === "bullet" ? "bullet" : "unranked";
+        createMatch(user, makeBotUser(), botMode, difficulty).catch((err) =>
           console.error("[match] bot createMatch error:", err),
         );
       }, BOT_QUEUE_TIMEOUT_MS);
@@ -1031,7 +1035,7 @@ io.on("connection", (socket: Socket) => {
     const user = users.get(socket.id);
     if (!user) return;
     clearQueueTimer(user.userId);
-    for (const m of ["ranked", "unranked"] as Mode[]) {
+    for (const m of ["ranked", "unranked", "bullet"] as Mode[]) {
       const idx = queues[m].findIndex((u) => u.userId === user.userId);
       if (idx !== -1) {
         queues[m].splice(idx, 1);
@@ -1269,7 +1273,7 @@ io.on("connection", (socket: Socket) => {
     const user = users.get(socket.id);
     if (user) {
       clearQueueTimer(user.userId);
-      for (const m of ["ranked", "unranked"] as Mode[]) {
+      for (const m of ["ranked", "unranked", "bullet"] as Mode[]) {
         const idx = queues[m].findIndex((u) => u.userId === user.userId);
         if (idx !== -1) queues[m].splice(idx, 1);
       }
