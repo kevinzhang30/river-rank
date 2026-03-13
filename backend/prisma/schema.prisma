@@ -32,3 +32,37 @@ model Match {
   p1 User @relation("MatchP1", fields: [p1Id], references: [id])
   p2 User @relation("MatchP2", fields: [p2Id], references: [id])
 }
+
+model Tournament {
+  id        String    @id @default(uuid())
+  hostId    String
+  joinCode  String    @unique
+  size      Int
+  status    String    @default("lobby")
+  winnerId  String?
+  createdAt DateTime  @default(now())
+  startedAt DateTime?
+  endedAt   DateTime?
+}
+
+model TournamentParticipant {
+  tournamentId String
+  userId       String
+  seed         Int?
+  joinedAt     DateTime @default(now())
+  @@id([tournamentId, userId])
+}
+
+model TournamentMatch {
+  id           String   @id @default(uuid())
+  tournamentId String
+  round        Int
+  position     Int
+  p1Id         String?
+  p2Id         String?
+  winnerId     String?
+  matchId      String?
+  status       String   @default("pending")
+  createdAt    DateTime @default(now())
+  @@unique([tournamentId, round, position])
+}

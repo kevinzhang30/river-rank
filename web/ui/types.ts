@@ -65,6 +65,27 @@ export interface HeroPrivate {
   holeCards: [string, string];
 }
 
+export interface TournamentMatchInfo {
+  id: string;
+  round: number;
+  position: number;
+  p1: { userId: string; username: string } | null;
+  p2: { userId: string; username: string } | null;
+  winnerId: string | null;
+  status: 'pending' | 'ready' | 'in_progress' | 'completed' | 'bye';
+}
+
+export interface TournamentState {
+  id: string;
+  hostId: string;
+  joinCode: string;
+  size: 4 | 8;
+  status: 'lobby' | 'in_progress' | 'completed';
+  winnerId: string | null;
+  participants: { userId: string; username: string; seed: number | null }[];
+  matches: TournamentMatchInfo[];
+}
+
 export interface LeaderboardEntry {
   id:          string;
   username:    string;

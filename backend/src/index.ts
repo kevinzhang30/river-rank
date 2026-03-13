@@ -64,6 +64,21 @@ interface PendingChallenge {
 }
 const pendingChallenges = new Map<string, PendingChallenge>(); // challengeId → challenge
 
+// tournaments
+interface TournamentState {
+  id: string;
+  hostId: string;
+  joinCode: string;
+  size: 4 | 8;
+  status: 'lobby' | 'in_progress' | 'completed';
+  participants: Map<string, { userId: string; username: string; elo: number }>;
+  winnerId?: string;
+  matchTimers: Map<string, ReturnType<typeof setTimeout>>;
+}
+const tournaments      = new Map<string, TournamentState>();
+const playerTournament = new Map<string, string>();  // userId → tournamentId
+const joinCodeIndex    = new Map<string, string>();  // code → tournamentId
+
 // ── Server setup ──────────────────────────────────────────────────────────────
 
 const app        = express();
@@ -551,6 +566,12 @@ function forfeitMatch(
   const winnerId = state.players.find((p) => p.id !== loserId)!.id;
   const winnerUsername = state.players.find((p) => p.id !== loserId)!.username;
 
+  // Tournament advancement
+  if (state.tournamentId && state.tournamentMatchId) {
+    handleTournamentMatchEnd(state.tournamentId, state.tournamentMatchId, winnerId)
+      .catch(err => console.error('[tournament] advancement error (forfeit):', err));
+  }
+
   // Clear all timers
   if (state.nextHandTimerId) { clearTimeout(state.nextHandTimerId); state.nextHandTimerId = undefined; }
   const existingBotTimer = botTimers.get(state.matchId);
@@ -656,6 +677,12 @@ function endHand(state: InternalGameState, winnerIndex: 0 | 1, reason: "FOLD" | 
     // ── In-memory guard: prevent double-recording if endHand is somehow called twice ──
     if (state.ended) return;
     state.ended = true;
+
+    // Tournament advancement
+    if (state.tournamentId && state.tournamentMatchId) {
+      handleTournamentMatchEnd(state.tournamentId, state.tournamentMatchId, winner.id)
+        .catch(err => console.error('[tournament] advancement error:', err));
+    }
 
     // Remove from active matches immediately so no further actions are accepted.
     matches.delete(state.matchId);
@@ -799,7 +826,11 @@ function startNewHand(state: InternalGameState): void {
 
 // ── Match factory ─────────────────────────────────────────────────────────────
 
-async function createMatch(p1: User, p2: User, mode: Mode, botDifficulty?: BotDifficulty): Promise<void> {
+async function createMatch(
+  p1: User, p2: User, mode: Mode,
+  botDifficulty?: BotDifficulty,
+  tournamentContext?: { tournamentId: string; tournamentMatchId: string },
+): Promise<void> {
   const matchId = uuidv4();
   const config  = mode === "bullet" ? BULLET_CONFIG : DEFAULT_CONFIG;
   const turnDurationMs = mode === "bullet" ? BULLET_TURN_DURATION_MS : TURN_DURATION_MS;
@@ -843,6 +874,11 @@ async function createMatch(p1: User, p2: User, mode: Mode, botDifficulty?: BotDi
     readyForNextHand:       {},
   };
 
+  if (tournamentContext) {
+    state.tournamentId = tournamentContext.tournamentId;
+    state.tournamentMatchId = tournamentContext.tournamentMatchId;
+  }
+
   matches.set(matchId, state);
   if (p1.userId !== BOT_ID) activeMatches.set(p1.userId, matchId);
   if (p2.userId !== BOT_ID) activeMatches.set(p2.userId, matchId);
@@ -878,6 +914,177 @@ function startNextHand(state: InternalGameState): void {
   const newDealer = state.players.find((p) => p.id !== state.dealerId)!;
   state.dealerId  = newDealer.id;
   startNewHand(state);
+}
+
+// ── Tournament helpers ────────────────────────────────────────────────────────
+
+function generateJoinCode(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
+function generateBracket(participants: { userId: string }[], size: 4 | 8) {
+  const shuffled = [...participants].sort(() => Math.random() - 0.5);
+  const totalRounds = Math.log2(size);
+  const slots: { round: number; position: number; p1Id: string | null; p2Id: string | null; status: string }[] = [];
+
+  for (let round = 1; round <= totalRounds; round++) {
+    const matchesInRound = size / Math.pow(2, round);
+    for (let pos = 0; pos < matchesInRound; pos++) {
+      slots.push({ round, position: pos, p1Id: null, p2Id: null, status: 'pending' });
+    }
+  }
+
+  // Fill round 1
+  const firstRoundSlots = size / 2;
+  for (let i = 0; i < firstRoundSlots; i++) {
+    const slot = slots.find(s => s.round === 1 && s.position === i)!;
+    slot.p1Id = shuffled[i * 2]?.userId ?? null;
+    slot.p2Id = shuffled[i * 2 + 1]?.userId ?? null;
+    if (slot.p1Id && slot.p2Id) slot.status = 'ready';
+    else if (slot.p1Id || slot.p2Id) slot.status = 'bye';
+    else slot.status = 'bye'; // empty match — no players on either side
+  }
+  return slots;
+}
+
+async function launchTournamentMatch(tournamentId: string, tournamentMatchId: string, p1Id: string, p2Id: string) {
+  const tournament = tournaments.get(tournamentId);
+  if (!tournament) return;
+
+  // Find User objects from the users map (need connected sockets)
+  let p1User: User | undefined;
+  let p2User: User | undefined;
+  for (const u of users.values()) {
+    if (u.userId === p1Id) p1User = u;
+    if (u.userId === p2Id) p2User = u;
+  }
+
+  // If either is disconnected, forfeit them
+  if (!p1User && !p2User) return;
+  if (!p1User) {
+    await handleTournamentMatchEnd(tournamentId, tournamentMatchId, p2Id);
+    return;
+  }
+  if (!p2User) {
+    await handleTournamentMatchEnd(tournamentId, tournamentMatchId, p1Id);
+    return;
+  }
+
+  // Update DB status
+  await supabaseAdmin
+    .from('tournament_matches')
+    .update({ status: 'in_progress' })
+    .eq('id', tournamentMatchId);
+
+  await createMatch(p1User, p2User, 'unranked', undefined, { tournamentId, tournamentMatchId });
+
+  io.to(`tournament:${tournamentId}`).emit('tournament.match_started', {
+    tournamentMatchId, p1Id, p2Id,
+  });
+  console.log(`[tournament] match launched ${tournamentMatchId.slice(0, 8)} — ${p1User.username} vs ${p2User.username}`);
+}
+
+async function handleTournamentMatchEnd(tournamentId: string, tournamentMatchId: string, winnerId: string) {
+  const tournament = tournaments.get(tournamentId);
+  if (!tournament) return;
+
+  // Update match in DB
+  await supabaseAdmin
+    .from('tournament_matches')
+    .update({ winner_id: winnerId, status: 'completed' })
+    .eq('id', tournamentMatchId);
+
+  // Read match details
+  const { data: matchRow } = await supabaseAdmin
+    .from('tournament_matches')
+    .select('round, position')
+    .eq('id', tournamentMatchId)
+    .single();
+  if (!matchRow) return;
+
+  const { round, position } = matchRow;
+  const totalRounds = Math.log2(tournament.size);
+
+  io.to(`tournament:${tournamentId}`).emit('tournament.bracket_updated', {
+    tournamentMatchId, winnerId,
+    nextRound: round < totalRounds ? round + 1 : null,
+    nextPosition: round < totalRounds ? Math.floor(position / 2) : null,
+  });
+
+  if (round === totalRounds) {
+    // Tournament complete
+    tournament.status = 'completed';
+    tournament.winnerId = winnerId;
+
+    await supabaseAdmin
+      .from('tournaments')
+      .update({ status: 'completed', winner_id: winnerId, ended_at: new Date().toISOString() })
+      .eq('id', tournamentId);
+
+    // Clean up playerTournament for all participants
+    for (const pId of tournament.participants.keys()) {
+      playerTournament.delete(pId);
+    }
+    // Clean up match timers
+    for (const timer of tournament.matchTimers.values()) clearTimeout(timer);
+    tournament.matchTimers.clear();
+
+    io.to(`tournament:${tournamentId}`).emit('tournament.completed', { winnerId });
+
+    // Get winner username
+    const winnerP = tournament.participants.get(winnerId);
+    console.log(`[tournament] ${tournamentId.slice(0, 8)} completed — winner: ${winnerP?.username ?? winnerId.slice(0, 8)}`);
+    return;
+  }
+
+  // Advance winner to next round
+  const nextRound = round + 1;
+  const nextPosition = Math.floor(position / 2);
+  const isP1Slot = position % 2 === 0;
+
+  const updateField = isP1Slot ? { p1_id: winnerId } : { p2_id: winnerId };
+  await supabaseAdmin
+    .from('tournament_matches')
+    .update(updateField)
+    .eq('tournament_id', tournamentId)
+    .eq('round', nextRound)
+    .eq('position', nextPosition);
+
+  // Check if next match now has both players
+  const { data: nextMatch } = await supabaseAdmin
+    .from('tournament_matches')
+    .select('id, p1_id, p2_id, status')
+    .eq('tournament_id', tournamentId)
+    .eq('round', nextRound)
+    .eq('position', nextPosition)
+    .single();
+
+  if (nextMatch && nextMatch.p1_id && nextMatch.p2_id && nextMatch.status === 'pending') {
+    await supabaseAdmin
+      .from('tournament_matches')
+      .update({ status: 'ready' })
+      .eq('id', nextMatch.id);
+
+    const startsAt = Date.now() + 10_000;
+    io.to(`tournament:${tournamentId}`).emit('tournament.match_ready', {
+      tournamentMatchId: nextMatch.id,
+      round: nextRound,
+      position: nextPosition,
+      p1Id: nextMatch.p1_id,
+      p2Id: nextMatch.p2_id,
+      startsAt,
+    });
+
+    const timer = setTimeout(() => {
+      tournament.matchTimers.delete(nextMatch.id);
+      launchTournamentMatch(tournamentId, nextMatch.id, nextMatch.p1_id!, nextMatch.p2_id!)
+        .catch(err => console.error('[tournament] launch error:', err));
+    }, 10_000);
+    tournament.matchTimers.set(nextMatch.id, timer);
+  }
 }
 
 // ── Turn timer loop ───────────────────────────────────────────────────────────
@@ -994,6 +1201,10 @@ io.on("connection", (socket: Socket) => {
           console.log(`[reconnect] ${user.username} rejoined match ${existingMatchId.slice(0, 8)}`);
         }
       }
+
+      // Reconnect to tournament room if in one
+      const tId = playerTournament.get(verifiedId);
+      if (tId) socket.join(`tournament:${tId}`);
     },
   );
 
@@ -1001,6 +1212,7 @@ io.on("connection", (socket: Socket) => {
     const user      = users.get(socket.id);
     if (!user) return;
     if (activeMatches.has(user.userId)) return; // prevent re-queuing during active match
+    if (playerTournament.has(user.userId)) return; // prevent queuing while in tournament
     const queueMode: Mode = mode === "unranked" ? "unranked" : mode === "bullet" ? "bullet" : "ranked";
     const q = queues[queueMode];
     if (q.some((u) => u.userId === user.userId)) return;
@@ -1269,6 +1481,378 @@ io.on("connection", (socket: Socket) => {
     },
   );
 
+  // ── Tournament handlers ───────────────────────────────────────────────────
+
+  socket.on("tournament.create", async (
+    { size }: { size: 4 | 8 },
+    ack: (r: { tournamentId?: string; joinCode?: string; error?: string }) => void,
+  ) => {
+    const user = users.get(socket.id);
+    if (!user) return ack({ error: "Not authenticated" });
+    if (playerTournament.has(user.userId)) return ack({ error: "Already in a tournament" });
+    if (activeMatches.has(user.userId)) return ack({ error: "Already in a match" });
+    if (size !== 4 && size !== 8) return ack({ error: "Invalid size" });
+
+    // Generate unique join code
+    let joinCode = generateJoinCode();
+    let attempts = 0;
+    while (joinCodeIndex.has(joinCode) && attempts < 20) {
+      joinCode = generateJoinCode();
+      attempts++;
+    }
+    if (joinCodeIndex.has(joinCode)) return ack({ error: "Could not generate unique code" });
+
+    // Insert into DB
+    const { data: tournamentRow, error } = await supabaseAdmin
+      .from('tournaments')
+      .insert({ host_id: user.userId, join_code: joinCode, size, status: 'lobby' })
+      .select('id')
+      .single();
+    if (error || !tournamentRow) return ack({ error: "Failed to create tournament" });
+
+    const tournamentId = tournamentRow.id;
+
+    await supabaseAdmin
+      .from('tournament_participants')
+      .insert({ tournament_id: tournamentId, user_id: user.userId });
+
+    // In-memory state
+    const ts: TournamentState = {
+      id: tournamentId,
+      hostId: user.userId,
+      joinCode,
+      size,
+      status: 'lobby',
+      participants: new Map([[user.userId, { userId: user.userId, username: user.username, elo: user.elo }]]),
+      matchTimers: new Map(),
+    };
+    tournaments.set(tournamentId, ts);
+    playerTournament.set(user.userId, tournamentId);
+    joinCodeIndex.set(joinCode, tournamentId);
+
+    socket.join(`tournament:${tournamentId}`);
+    console.log(`[tournament] created ${tournamentId.slice(0, 8)} by ${user.username} — size=${size} code=${joinCode}`);
+    ack({ tournamentId, joinCode });
+  });
+
+  socket.on("tournament.join", async (
+    { joinCode }: { joinCode: string },
+    ack: (r: { tournamentId?: string; error?: string }) => void,
+  ) => {
+    const user = users.get(socket.id);
+    if (!user) return ack({ error: "Not authenticated" });
+    if (playerTournament.has(user.userId)) return ack({ error: "Already in a tournament" });
+    if (activeMatches.has(user.userId)) return ack({ error: "Already in a match" });
+
+    const code = joinCode.trim().toUpperCase();
+    const tournamentId = joinCodeIndex.get(code);
+    if (!tournamentId) return ack({ error: "Tournament not found" });
+
+    const tournament = tournaments.get(tournamentId);
+    if (!tournament) return ack({ error: "Tournament not found" });
+    if (tournament.status !== 'lobby') return ack({ error: "Tournament already started" });
+    if (tournament.participants.size >= tournament.size) return ack({ error: "Tournament is full" });
+    if (tournament.participants.has(user.userId)) return ack({ error: "Already in this tournament" });
+
+    await supabaseAdmin
+      .from('tournament_participants')
+      .insert({ tournament_id: tournamentId, user_id: user.userId });
+
+    tournament.participants.set(user.userId, { userId: user.userId, username: user.username, elo: user.elo });
+    playerTournament.set(user.userId, tournamentId);
+
+    socket.join(`tournament:${tournamentId}`);
+    io.to(`tournament:${tournamentId}`).emit('tournament.player_joined', {
+      tournamentId,
+      userId: user.userId,
+      username: user.username,
+      participantCount: tournament.participants.size,
+    });
+    console.log(`[tournament] ${user.username} joined ${tournamentId.slice(0, 8)} (${tournament.participants.size}/${tournament.size})`);
+    ack({ tournamentId });
+  });
+
+  socket.on("tournament.leave", async (
+    { tournamentId }: { tournamentId: string },
+    ack: (r: { ok?: boolean; error?: string }) => void,
+  ) => {
+    const user = users.get(socket.id);
+    if (!user) return ack({ error: "Not authenticated" });
+
+    const tournament = tournaments.get(tournamentId);
+    if (!tournament) return ack({ error: "Tournament not found" });
+    if (!tournament.participants.has(user.userId)) return ack({ error: "Not in this tournament" });
+
+    // Allow leaving in any status
+    if (tournament.status !== 'lobby') {
+      // In progress or completed — just remove from tracking, let match forfeits handle the rest
+      playerTournament.delete(user.userId);
+      socket.leave(`tournament:${tournamentId}`);
+      console.log(`[tournament] ${user.username} left active tournament ${tournamentId.slice(0, 8)}`);
+      return ack({ ok: true });
+    }
+
+    if (tournament.hostId === user.userId) {
+      // Host leaves → cancel tournament
+      await supabaseAdmin.from('tournaments').delete().eq('id', tournamentId);
+      for (const pId of tournament.participants.keys()) {
+        playerTournament.delete(pId);
+      }
+      joinCodeIndex.delete(tournament.joinCode);
+      tournaments.delete(tournamentId);
+      io.to(`tournament:${tournamentId}`).emit('tournament.cancelled', { tournamentId });
+      console.log(`[tournament] ${tournamentId.slice(0, 8)} cancelled — host left`);
+    } else {
+      await supabaseAdmin
+        .from('tournament_participants')
+        .delete()
+        .eq('tournament_id', tournamentId)
+        .eq('user_id', user.userId);
+      tournament.participants.delete(user.userId);
+      playerTournament.delete(user.userId);
+      socket.leave(`tournament:${tournamentId}`);
+      io.to(`tournament:${tournamentId}`).emit('tournament.player_left', {
+        tournamentId,
+        userId: user.userId,
+        participantCount: tournament.participants.size,
+      });
+      console.log(`[tournament] ${user.username} left ${tournamentId.slice(0, 8)} (${tournament.participants.size}/${tournament.size})`);
+    }
+    ack({ ok: true });
+  });
+
+  socket.on("tournament.start", async (
+    { tournamentId }: { tournamentId: string },
+    ack: (r: { ok?: boolean; error?: string }) => void,
+  ) => {
+    const user = users.get(socket.id);
+    if (!user) return ack({ error: "Not authenticated" });
+
+    const tournament = tournaments.get(tournamentId);
+    if (!tournament) return ack({ error: "Tournament not found" });
+    if (tournament.hostId !== user.userId) return ack({ error: "Only the host can start" });
+    if (tournament.status !== 'lobby') return ack({ error: "Tournament already started" });
+    if (tournament.participants.size < 2) return ack({ error: "Need at least 2 players" });
+
+    // Generate bracket
+    const participantList = Array.from(tournament.participants.values());
+    const bracketSlots = generateBracket(participantList, tournament.size);
+
+    // Assign seeds
+    let seedIdx = 0;
+    for (const slot of bracketSlots.filter(s => s.round === 1)) {
+      if (slot.p1Id) {
+        seedIdx++;
+        await supabaseAdmin
+          .from('tournament_participants')
+          .update({ seed: seedIdx })
+          .eq('tournament_id', tournamentId)
+          .eq('user_id', slot.p1Id);
+      }
+      if (slot.p2Id) {
+        seedIdx++;
+        await supabaseAdmin
+          .from('tournament_participants')
+          .update({ seed: seedIdx })
+          .eq('tournament_id', tournamentId)
+          .eq('user_id', slot.p2Id);
+      }
+    }
+
+    // Insert match rows
+    const matchInserts = bracketSlots.map(s => ({
+      tournament_id: tournamentId,
+      round: s.round,
+      position: s.position,
+      p1_id: s.p1Id,
+      p2_id: s.p2Id,
+      status: s.status,
+    }));
+    await supabaseAdmin.from('tournament_matches').insert(matchInserts);
+
+    // Update tournament status
+    tournament.status = 'in_progress';
+    await supabaseAdmin
+      .from('tournaments')
+      .update({ status: 'in_progress', started_at: new Date().toISOString() })
+      .eq('id', tournamentId);
+
+    // Read inserted matches to get IDs
+    const { data: dbMatches } = await supabaseAdmin
+      .from('tournament_matches')
+      .select('id, round, position, p1_id, p2_id, status')
+      .eq('tournament_id', tournamentId)
+      .order('round')
+      .order('position');
+
+    // Process byes: auto-advance, then propagate through later rounds
+    const totalRounds = Math.log2(tournament.size);
+    for (let round = 1; round <= totalRounds; round++) {
+      // Re-read current round matches each iteration (previous round may have updated them)
+      const { data: roundMatches } = await supabaseAdmin
+        .from('tournament_matches')
+        .select('id, round, position, p1_id, p2_id, winner_id, status')
+        .eq('tournament_id', tournamentId)
+        .eq('round', round);
+
+      for (const bm of (roundMatches ?? [])) {
+        const hasP1 = !!bm.p1_id;
+        const hasP2 = !!bm.p2_id;
+
+        // Skip if already processed or is a real match
+        if (bm.status === 'ready' || bm.status === 'completed') continue;
+        if (hasP1 && hasP2) continue; // real match, will be set to ready below
+
+        // Bye: one or zero players
+        const winnerId = bm.p1_id ?? bm.p2_id; // null if empty match
+        await supabaseAdmin
+          .from('tournament_matches')
+          .update({ winner_id: winnerId, status: 'bye' })
+          .eq('id', bm.id);
+
+        // Advance winner (if any) to next round
+        if (winnerId && round < totalRounds) {
+          const nextRound = round + 1;
+          const nextPosition = Math.floor(bm.position / 2);
+          const isP1Slot = bm.position % 2 === 0;
+          const updateField = isP1Slot ? { p1_id: winnerId } : { p2_id: winnerId };
+          await supabaseAdmin
+            .from('tournament_matches')
+            .update(updateField)
+            .eq('tournament_id', tournamentId)
+            .eq('round', nextRound)
+            .eq('position', nextPosition);
+        }
+      }
+    }
+
+    // Re-read all matches after bye processing
+    const { data: updatedMatches } = await supabaseAdmin
+      .from('tournament_matches')
+      .select('id, round, position, p1_id, p2_id, winner_id, status')
+      .eq('tournament_id', tournamentId)
+      .order('round')
+      .order('position');
+
+    // Mark matches with both players as ready
+    for (const m of (updatedMatches ?? [])) {
+      if (m.p1_id && m.p2_id && (m.status === 'pending' || m.status === 'bye') && !m.winner_id) {
+        await supabaseAdmin
+          .from('tournament_matches')
+          .update({ status: 'ready' })
+          .eq('id', m.id);
+        m.status = 'ready';
+      }
+    }
+
+    // Build full state for broadcast
+    const matchesPayload = (updatedMatches ?? []).map(m => ({
+      id: m.id,
+      round: m.round,
+      position: m.position,
+      p1: m.p1_id ? { userId: m.p1_id, username: tournament.participants.get(m.p1_id)?.username ?? 'Unknown' } : null,
+      p2: m.p2_id ? { userId: m.p2_id, username: tournament.participants.get(m.p2_id)?.username ?? 'Unknown' } : null,
+      winnerId: m.winner_id,
+      status: m.status,
+    }));
+    const participantsPayload = participantList.map((p, i) => ({
+      userId: p.userId, username: p.username, seed: i + 1,
+    }));
+
+    io.to(`tournament:${tournamentId}`).emit('tournament.started', {
+      id: tournamentId,
+      hostId: tournament.hostId,
+      joinCode: tournament.joinCode,
+      size: tournament.size,
+      status: 'in_progress',
+      winnerId: null,
+      participants: participantsPayload,
+      matches: matchesPayload,
+    });
+
+    // Launch ready matches with 10s timer
+    const readyMatches = (updatedMatches ?? []).filter(m => m.status === 'ready');
+    for (const rm of readyMatches) {
+      const startsAt = Date.now() + 10_000;
+      io.to(`tournament:${tournamentId}`).emit('tournament.match_ready', {
+        tournamentMatchId: rm.id,
+        round: rm.round,
+        position: rm.position,
+        p1Id: rm.p1_id,
+        p2Id: rm.p2_id,
+        startsAt,
+      });
+
+      const timer = setTimeout(() => {
+        tournament.matchTimers.delete(rm.id);
+        launchTournamentMatch(tournamentId, rm.id, rm.p1_id!, rm.p2_id!)
+          .catch(err => console.error('[tournament] launch error:', err));
+      }, 10_000);
+      tournament.matchTimers.set(rm.id, timer);
+    }
+
+    console.log(`[tournament] ${tournamentId.slice(0, 8)} started — ${participantList.length} players, ${readyMatches.length} ready matches`);
+    ack({ ok: true });
+  });
+
+  socket.on("tournament.get_state", async (
+    { tournamentId }: { tournamentId: string },
+    ack: (r: any) => void,
+  ) => {
+    // Read from DB for authoritative state
+    const { data: t } = await supabaseAdmin
+      .from('tournaments')
+      .select('*')
+      .eq('id', tournamentId)
+      .single();
+    if (!t) return ack({ error: "Tournament not found" });
+
+    const { data: participants } = await supabaseAdmin
+      .from('tournament_participants')
+      .select('user_id, seed')
+      .eq('tournament_id', tournamentId);
+
+    // Get usernames from profiles
+    const userIds = (participants ?? []).map(p => p.user_id);
+    const { data: profiles } = await supabaseAdmin
+      .from('profiles')
+      .select('id, username')
+      .in('id', userIds);
+    const profileMap = new Map((profiles ?? []).map(p => [p.id, p.username]));
+
+    const { data: matchRows } = await supabaseAdmin
+      .from('tournament_matches')
+      .select('id, round, position, p1_id, p2_id, winner_id, status')
+      .eq('tournament_id', tournamentId)
+      .order('round')
+      .order('position');
+
+    ack({
+      id: t.id,
+      hostId: t.host_id,
+      joinCode: t.join_code,
+      size: t.size,
+      status: t.status,
+      winnerId: t.winner_id,
+      participants: (participants ?? []).map(p => ({
+        userId: p.user_id,
+        username: profileMap.get(p.user_id) ?? 'Unknown',
+        seed: p.seed,
+      })),
+      matches: (matchRows ?? []).map(m => ({
+        id: m.id,
+        round: m.round,
+        position: m.position,
+        p1: m.p1_id ? { userId: m.p1_id, username: profileMap.get(m.p1_id) ?? 'Unknown' } : null,
+        p2: m.p2_id ? { userId: m.p2_id, username: profileMap.get(m.p2_id) ?? 'Unknown' } : null,
+        winnerId: m.winner_id,
+        status: m.status,
+      })),
+    });
+  });
+
+  // ── Disconnect ─────────────────────────────────────────────────────────────
+
   socket.on("disconnect", () => {
     const user = users.get(socket.id);
     if (user) {
@@ -1290,6 +1874,11 @@ io.on("connection", (socket: Socket) => {
           io.to(`user:${challenge.toUserId}`).emit("challenge.expired", { challengeId: cid });
         }
       }
+
+      // Tournament disconnect: don't auto-cancel/remove on socket disconnect
+      // because page navigation (dashboard → tournament page) causes a brief disconnect.
+      // Cleanup only happens via explicit tournament.leave.
+      // If in_progress: match disconnect handling below (30s grace → forfeit → handleTournamentMatchEnd) handles it.
 
       // Handle active match disconnect
       const matchId = activeMatches.get(user.userId);

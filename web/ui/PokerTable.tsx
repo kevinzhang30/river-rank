@@ -185,7 +185,7 @@ export function PokerTable({
         }}
       >
         <span className="wordmark" style={{ fontWeight: 800, fontSize: 12, color: "var(--text)" }}>
-          RiverRank ♠
+          RiverRank.io ♠
         </span>
 
         <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 16, fontSize: 10 }}>
