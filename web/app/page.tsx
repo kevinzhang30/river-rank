@@ -406,11 +406,198 @@ function TournamentCard({
 
 // ── Account card ──────────────────────────────────────────────────────────────
 
-function AccountCard({ onSignOut }: { onSignOut: () => void }) {
+function AccountCard({
+  onSignOut,
+  currentUsername,
+  userId,
+  onUsernameChanged,
+}: {
+  onSignOut: () => void;
+  currentUsername: string | null;
+  userId: string | null;
+  onUsernameChanged: (newName: string) => void;
+}) {
+  const [editing, setEditing]       = useState(false);
+  const [draft, setDraft]           = useState(currentUsername ?? "");
+  const [saving, setSaving]         = useState(false);
+  const [error, setError]           = useState<string | null>(null);
+  const [cooldownEnd, setCooldownEnd] = useState<Date | null>(null);
+  const [joinedAt, setJoinedAt] = useState<string | null>(null);
+
+  // Fetch cooldown on mount
+  useEffect(() => {
+    if (!userId) return;
+    supabase
+      .from("profiles")
+      .select("username_changed_at, created_at")
+      .eq("id", userId)
+      .single()
+      .then(({ data }) => {
+        if (data?.username_changed_at) {
+          const end = new Date(new Date(data.username_changed_at).getTime() + 30 * 24 * 60 * 60 * 1000);
+          if (end > new Date()) setCooldownEnd(end);
+        }
+        if (data?.created_at) setJoinedAt(data.created_at);
+      });
+  }, [userId]);
+
+  const cooldownActive = cooldownEnd && cooldownEnd > new Date();
+  const cooldownDaysLeft = cooldownActive
+    ? Math.ceil((cooldownEnd.getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+    : 0;
+
+  function startEditing() {
+    setDraft(currentUsername ?? "");
+    setError(null);
+    setEditing(true);
+  }
+
+  async function saveUsername() {
+    const trimmed = draft.trim();
+    if (trimmed === currentUsername) { setEditing(false); return; }
+    const hint = usernameHint(trimmed);
+    if (hint) { setError(hint); return; }
+    if (!userId) return;
+
+    setSaving(true);
+    setError(null);
+
+    // Re-check cooldown server-side
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("username_changed_at")
+      .eq("id", userId)
+      .single();
+    if (profile?.username_changed_at) {
+      const end = new Date(new Date(profile.username_changed_at).getTime() + 30 * 24 * 60 * 60 * 1000);
+      if (end > new Date()) {
+        setCooldownEnd(end);
+        setError(`You can change your username again in ${Math.ceil((end.getTime() - Date.now()) / (24 * 60 * 60 * 1000))} days.`);
+        setSaving(false);
+        return;
+      }
+    }
+
+    // Check availability
+    const { data: existing } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("username", trimmed)
+      .neq("id", userId)
+      .maybeSingle();
+    if (existing) { setError("Username is taken."); setSaving(false); return; }
+
+    const { error: updateErr } = await supabase
+      .from("profiles")
+      .update({ username: trimmed, username_changed_at: new Date().toISOString() })
+      .eq("id", userId);
+    if (updateErr) { setError("Failed to update."); setSaving(false); return; }
+
+    setCooldownEnd(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000));
+    onUsernameChanged(trimmed);
+    setEditing(false);
+    setSaving(false);
+  }
+
   return (
     <Card>
       <CardLabel>Settings</CardLabel>
       <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+        {/* Username */}
+        <div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: editing ? 8 : 0 }}>
+            <span style={{ fontSize: 12, color: "var(--text2)" }}>Username</span>
+            {!editing && (
+              cooldownActive ? (
+                <span style={{ fontSize: 10, color: "var(--text3)", fontFamily: "monospace" }}>
+                  {cooldownDaysLeft}d cooldown
+                </span>
+              ) : (
+                <button
+                  onClick={startEditing}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: "var(--primaryBtn)",
+                    fontSize: 11,
+                    fontFamily: "monospace",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    padding: "2px 4px",
+                  }}
+                >
+                  Edit
+                </button>
+              )
+            )}
+          </div>
+          {editing ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <input
+                value={draft}
+                onChange={(e) => { setDraft(e.target.value); setError(null); }}
+                onKeyDown={(e) => { if (e.key === "Enter") saveUsername(); if (e.key === "Escape") setEditing(false); }}
+                maxLength={16}
+                autoFocus
+                style={{
+                  background: "var(--surface2)",
+                  border: `1px solid ${error ? "var(--danger)" : "var(--border)"}`,
+                  borderRadius: 4,
+                  padding: "0.45rem 0.6rem",
+                  fontSize: 13,
+                  fontFamily: "monospace",
+                  color: "var(--text)",
+                  outline: "none",
+                  width: "100%",
+                  boxSizing: "border-box",
+                }}
+              />
+              {error && <span style={{ fontSize: 11, color: "var(--danger)" }}>{error}</span>}
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  onClick={saveUsername}
+                  disabled={saving}
+                  style={{
+                    flex: 1,
+                    background: "var(--primaryBtn)",
+                    color: "var(--primaryBtnText)",
+                    border: "1px solid transparent",
+                    borderRadius: 4,
+                    padding: "0.4rem 0.75rem",
+                    fontSize: 11,
+                    fontFamily: "monospace",
+                    fontWeight: 700,
+                    cursor: saving ? "not-allowed" : "pointer",
+                    opacity: saving ? 0.6 : 1,
+                  }}
+                >
+                  {saving ? "Saving..." : "Save"}
+                </button>
+                <button
+                  onClick={() => setEditing(false)}
+                  style={{
+                    background: "transparent",
+                    color: "var(--text3)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 4,
+                    padding: "0.4rem 0.75rem",
+                    fontSize: 11,
+                    fontFamily: "monospace",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+              {currentUsername ?? "—"}
+            </span>
+          )}
+        </div>
+
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ fontSize: 12, color: "var(--text2)" }}>Theme</span>
           <ThemeToggle />
@@ -418,6 +605,12 @@ function AccountCard({ onSignOut }: { onSignOut: () => void }) {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ fontSize: 12, color: "var(--text2)" }}>4-colour deck</span>
           <DeckToggle />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: 12, color: "var(--text2)" }}>Joined</span>
+          <span style={{ fontSize: 12, color: "var(--text3)", fontFamily: "monospace" }}>
+            {joinedAt ? new Date(joinedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
+          </span>
         </div>
         <div
           style={{
@@ -1894,7 +2087,12 @@ function PageInner() {
               onNavigate={(path) => router.push(path)}
             />
             <div ref={settingsRef}>
-              <AccountCard onSignOut={signOut} />
+              <AccountCard
+                onSignOut={signOut}
+                currentUsername={profile?.username ?? null}
+                userId={session?.user.id ?? null}
+                onUsernameChanged={(newName) => setProfile((p) => p ? { ...p, username: newName } : p)}
+              />
             </div>
           </div>
 

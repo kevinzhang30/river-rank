@@ -20,25 +20,49 @@ export default function TournamentPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [state, setState] = useState<TournamentState | null>(null);
   const [copied, setCopied] = useState(false);
-  const [matchCountdown, setMatchCountdown] = useState<number | null>(null);
   const [myMatchReady, setMyMatchReady] = useState<{
     tournamentMatchId: string;
     opponentId: string;
     opponentName: string;
-    startsAt: number;
   } | null>(null);
+  const [readyPlayerIds, setReadyPlayerIds] = useState<Set<string>>(new Set());
   const [eliminated, setEliminated] = useState(false);
 
   const stateRef = useRef(state);
   stateRef.current = state;
 
-  const fetchState = useCallback((socket: Socket) => {
+  const fetchState = useCallback((socket: Socket, uid: string) => {
     socket.emit(
       "tournament.get_state",
       { tournamentId },
       (res: TournamentState & { error?: string }) => {
         if (res.error) return;
         setState(res);
+
+        // Check if user has a ready match (e.g. returning from a game)
+        if (res.status === 'in_progress') {
+          const readyMatch = res.matches.find(
+            (m) => m.status === 'ready' &&
+              (m.p1?.userId === uid || m.p2?.userId === uid),
+          );
+          if (readyMatch) {
+            const opponentId = readyMatch.p1?.userId === uid
+              ? readyMatch.p2?.userId ?? ''
+              : readyMatch.p1?.userId ?? '';
+            const opponentName = readyMatch.p1?.userId === uid
+              ? readyMatch.p2?.username ?? 'Opponent'
+              : readyMatch.p1?.username ?? 'Opponent';
+            setMyMatchReady({ tournamentMatchId: readyMatch.id, opponentId, opponentName });
+            setReadyPlayerIds(new Set());
+          }
+
+          // Check if user is eliminated
+          const userMatches = res.matches.filter(
+            (m) => (m.p1?.userId === uid || m.p2?.userId === uid) && m.status === 'completed',
+          );
+          const wasEliminated = userMatches.some((m) => m.winnerId && m.winnerId !== uid);
+          if (wasEliminated) setEliminated(true);
+        }
       },
     );
   }, [tournamentId]);
@@ -73,7 +97,7 @@ export default function TournamentPage() {
           "auth.guest",
           { username },
           () => {
-            fetchState(socket);
+            fetchState(socket, uid);
           },
         );
       });
@@ -112,14 +136,13 @@ export default function TournamentPage() {
       });
 
       socket.on("tournament.match_ready", ({
-        tournamentMatchId, round, position, p1Id, p2Id, startsAt,
+        tournamentMatchId, round, position, p1Id, p2Id,
       }: {
         tournamentMatchId: string;
         round: number;
         position: number;
         p1Id: string;
         p2Id: string;
-        startsAt: number;
       }) => {
         // Update match status in state
         setState((prev) => {
@@ -140,8 +163,19 @@ export default function TournamentPage() {
           const cur = stateRef.current;
           const opponentName =
             cur?.participants.find((p) => p.userId === opponentId)?.username ?? "Opponent";
-          setMyMatchReady({ tournamentMatchId, opponentId, opponentName, startsAt });
+          setMyMatchReady({ tournamentMatchId, opponentId, opponentName });
+          setReadyPlayerIds(new Set());
         }
+      });
+
+      socket.on("tournament.player_readied", ({
+        tournamentMatchId, userId: readiedUserId, readyPlayerIds: ids,
+      }: {
+        tournamentMatchId: string;
+        userId: string;
+        readyPlayerIds: string[];
+      }) => {
+        setReadyPlayerIds(new Set(ids));
       });
 
       socket.on("tournament.match_started", ({ tournamentMatchId, p1Id, p2Id }) => {
@@ -218,20 +252,16 @@ export default function TournamentPage() {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Countdown timer for match ready
-  useEffect(() => {
-    if (!myMatchReady) {
-      setMatchCountdown(null);
-      return;
-    }
-    const tick = () => {
-      const remaining = Math.max(0, Math.ceil((myMatchReady.startsAt - Date.now()) / 1000));
-      setMatchCountdown(remaining);
-    };
-    tick();
-    const interval = setInterval(tick, 250);
-    return () => clearInterval(interval);
-  }, [myMatchReady]);
+  function handleReadyUp() {
+    if (!myMatchReady) return;
+    socketRef.current?.emit(
+      "tournament.match_ready_up",
+      { tournamentMatchId: myMatchReady.tournamentMatchId },
+      (res: { ok?: boolean; error?: string }) => {
+        if (res.error) console.error("Ready up error:", res.error);
+      },
+    );
+  }
 
   function copyCode() {
     if (!state) return;
@@ -576,25 +606,124 @@ export default function TournamentPage() {
           </div>
         )}
 
-        {/* Match ready banner */}
-        {myMatchReady && matchCountdown !== null && (
-          <div
-            style={{
-              textAlign: "center",
-              padding: "1rem 1.5rem",
-              background: "var(--surface)",
-              border: "1px solid #60A5FA",
-              borderRadius: 8,
-            }}
-          >
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#60A5FA" }}>
-              Your match starts in {matchCountdown}s
+        {/* Match ready-up banner */}
+        {myMatchReady && (() => {
+          const youReady = !!(userId && readyPlayerIds.has(userId));
+          const oppReady = readyPlayerIds.has(myMatchReady.opponentId);
+          return (
+            <div
+              style={{
+                padding: "1.5rem",
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: "1.25rem",
+              }}
+            >
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 2, color: "var(--text3)", textTransform: "uppercase" }}>
+                Next Match
+              </div>
+
+              {/* Player vs Player row */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: isMobile ? "1rem" : "1.5rem",
+                  width: "100%",
+                  justifyContent: "center",
+                }}
+              >
+                {/* You */}
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, minWidth: 80 }}>
+                  <div
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: "50%",
+                      border: `2px solid ${youReady ? "var(--success)" : "var(--border)"}`,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 14,
+                      fontWeight: 800,
+                      color: youReady ? "var(--success)" : "var(--text3)",
+                      background: youReady ? "rgba(34,197,94,0.1)" : "var(--surface2)",
+                      transition: "all 0.2s ease",
+                    }}
+                  >
+                    {youReady ? "✓" : "?"}
+                  </div>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>You</span>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: youReady ? "var(--success)" : "var(--text3)" }}>
+                    {youReady ? "READY" : "NOT READY"}
+                  </span>
+                </div>
+
+                {/* VS */}
+                <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text3)", letterSpacing: 1 }}>
+                  VS
+                </div>
+
+                {/* Opponent */}
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, minWidth: 80 }}>
+                  <div
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: "50%",
+                      border: `2px solid ${oppReady ? "var(--success)" : "var(--border)"}`,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 14,
+                      fontWeight: 800,
+                      color: oppReady ? "var(--success)" : "var(--text3)",
+                      background: oppReady ? "rgba(34,197,94,0.1)" : "var(--surface2)",
+                      transition: "all 0.2s ease",
+                    }}
+                  >
+                    {oppReady ? "✓" : "?"}
+                  </div>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", maxWidth: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "center" }}>
+                    {myMatchReady.opponentName}
+                  </span>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: oppReady ? "var(--success)" : "var(--text3)" }}>
+                    {oppReady ? "READY" : "NOT READY"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Action */}
+              {!youReady ? (
+                <button
+                  onClick={handleReadyUp}
+                  style={{
+                    background: "var(--primaryBtn)",
+                    color: "var(--primaryBtnText)",
+                    border: "1px solid transparent",
+                    borderRadius: 4,
+                    padding: "0.7rem 2.5rem",
+                    fontSize: "0.95rem",
+                    fontFamily: "monospace",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    letterSpacing: 0.5,
+                  }}
+                >
+                  Ready Up
+                </button>
+              ) : (
+                <div style={{ fontSize: 12, color: "var(--text3)", fontWeight: 600 }}>
+                  Waiting for opponent...
+                </div>
+              )}
             </div>
-            <div style={{ fontSize: 13, color: "var(--text2)", marginTop: 4 }}>
-              vs {myMatchReady.opponentName}
-            </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Eliminated banner */}
         {eliminated && state.status !== "completed" && (
