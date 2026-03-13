@@ -26,6 +26,8 @@ model Match {
   p2Id      String
   mode      String
   winnerId  String?
+  p1Delta   Int?      @map("p1_delta")
+  p2Delta   Int?      @map("p2_delta")
   createdAt DateTime  @default(now())
   endedAt   DateTime?
 

@@ -863,6 +863,7 @@ function FriendsCard({
   onDeclineChallenge,
   onCancelChallenge,
   challengeWaiting,
+  onlineFriends,
 }: {
   friends:            Friend[];
   friendCode:         string | null;
@@ -872,6 +873,7 @@ function FriendsCard({
   onDeclineChallenge: () => void;
   onCancelChallenge:  () => void;
   challengeWaiting:   { friendId: string; challengeId: string } | null;
+  onlineFriends:      Set<string>;
 }) {
   const [showLink, setShowLink] = useState(false);
   const [copied, setCopied]     = useState(false);
@@ -1020,6 +1022,12 @@ function FriendsCard({
                   border:       "1px solid var(--border)",
                 }}
               >
+                {/* Online indicator */}
+                <span style={{
+                  width: 8, height: 8, borderRadius: "50%",
+                  background: onlineFriends.has(f.id) ? "#22C55E" : "var(--border)",
+                  flexShrink: 0,
+                }} />
                 {/* Name */}
                 <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {flag}{f.username}
@@ -1595,6 +1603,7 @@ function PageInner() {
   const [pendingChallenge, setPendingChallenge] = useState<IncomingChallenge | null>(null);
   const [challengeWaiting, setChallengeWaiting] = useState<{ friendId: string; challengeId: string } | null>(null);
   const [friendToast, setFriendToast]           = useState<string | null>(null);
+  const [onlineFriends, setOnlineFriends]       = useState<Set<string>>(new Set());
   const dashboardSocketRef = useRef<Socket | null>(null);
 
   // Session
@@ -1653,7 +1662,7 @@ function PageInner() {
     const userId = session.user.id;
     supabase
       .from("matches")
-      .select("id, p1, p2, winner, ranked, ended_at, p1_prof:profiles!p1(username), p2_prof:profiles!p2(username)")
+      .select("id, p1, p2, winner, ranked, ended_at, p1_delta, p2_delta, p1_prof:profiles!p1(username), p2_prof:profiles!p2(username)")
       .or(`p1.eq.${userId},p2.eq.${userId}`)
       .not("ended_at", "is", null)
       .order("ended_at", { ascending: false })
@@ -1671,7 +1680,7 @@ function PageInner() {
                 row.winner === null ? "DRAW" :
                 row.winner === userId ? "WIN" : "LOSS",
               mode: row.ranked ? "ranked" : "unranked",
-              ratingDelta: null,
+              ratingDelta: row.ranked ? (isP1 ? row.p1_delta : row.p2_delta) : null,
               timeAgo: timeAgo(row.ended_at),
             } satisfies RecentMatch;
           })
@@ -1780,17 +1789,21 @@ function PageInner() {
       router.push(`/game?mode=${mMode ?? "ranked"}`);
     });
 
-    socket.on("session.replaced", () => {
-      socket.disconnect();
-      dashboardSocketRef.current = null;
-    });
-
     return () => {
       socket.disconnect();
       dashboardSocketRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.access_token, profile?.username]);
+
+  // Request online status for friends when friends list loads
+  useEffect(() => {
+    const socket = dashboardSocketRef.current;
+    if (!socket?.connected || friends.length === 0) return;
+    socket.emit("friends.status", { friendIds: friends.map(f => f.id) }, (online: string[]) => {
+      setOnlineFriends(new Set(online));
+    });
+  }, [friends]);
 
   function handleChallenge(friendId: string, mode: Mode) {
     const socket = dashboardSocketRef.current;
@@ -2119,6 +2132,7 @@ function PageInner() {
               onDeclineChallenge={handleDeclineChallenge}
               onCancelChallenge={handleCancelChallenge}
               challengeWaiting={challengeWaiting}
+              onlineFriends={onlineFriends}
             />
             <RecentMatchesCard matches={recentMatches} />
           </div>
