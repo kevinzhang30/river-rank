@@ -58,6 +58,9 @@ function GameView() {
   const [queueTick, setQueueTick]         = useState(0);
   const [liveState, setLiveState]         = useState<PublicGameState | null>(null);
   const [liveHeroCards, setLiveHeroCards] = useState<[string, string] | null>(null);
+  const [heroBestHand, setHeroBestHand] = useState<string | null>(null);
+  const [liveOpponentCards, setLiveOpponentCards] = useState<[string, string] | null>(null);
+  const [opponentBestHand, setOpponentBestHand] = useState<string | null>(null);
   const [rawBackendState, setRawBackendState] = useState<BackendGameState | null>(null);
   const [opponentDisconnectedAt, setOpponentDisconnectedAt] = useState<number | null>(null);
 
@@ -127,10 +130,17 @@ function GameView() {
 
       socket.on(
         "game.state",
-        ({ publicState, heroHoleCards }: { publicState: PublicGameState; heroHoleCards: string[] }) => {
+        ({ publicState, heroHoleCards, heroBestHand, opponentHoleCards, opponentBestHand }: { publicState: PublicGameState; heroHoleCards: string[]; heroBestHand?: string | null; opponentHoleCards?: string[] | null; opponentBestHand?: string | null }) => {
           setLiveState(publicState);
           if (heroHoleCards.length >= 2) {
             setLiveHeroCards([heroHoleCards[0], heroHoleCards[1]]);
+          }
+          setHeroBestHand(heroBestHand ?? null);
+          setOpponentBestHand(opponentBestHand ?? null);
+          if (opponentHoleCards && opponentHoleCards.length >= 2) {
+            setLiveOpponentCards([opponentHoleCards[0], opponentHoleCards[1]]);
+          } else {
+            setLiveOpponentCards(null);
           }
         },
       );
@@ -337,6 +347,9 @@ function GameView() {
           state={tableState}
           heroUserId={userId}
           heroHoleCards={tableHeroCards}
+          heroBestHand={heroBestHand}
+          liveOpponentCards={liveOpponentCards}
+          opponentBestHand={opponentBestHand}
           onFold={() => sendAction("FOLD")}
           onCheck={() => sendAction("CHECK")}
           onCall={() => sendAction("CALL")}

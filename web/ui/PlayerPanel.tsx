@@ -111,8 +111,8 @@ export function PlayerPanel({ player, isHero, holeCards, handResult, turnDeadlin
         {badge}
       </div>
 
-      {/* Hand category (shown at showdown) */}
-      {handResult && handCategory && (
+      {/* Hand category (shown at showdown, during live play for hero, or during all-in runout) */}
+      {handCategory && (
         <div style={{ color: "var(--text3)", fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase" }}>
           {handCategory.replace(/_/g, " ")}
         </div>

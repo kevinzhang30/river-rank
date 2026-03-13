@@ -47,6 +47,32 @@ const RUNOUT_STREET_DELAY_MS   = 1_000;
 const users         = new Map<string, User>();
 const userSockets   = new Map<string, string>(); // userId → socketId
 const queuedPlayers = new Set<string>();          // userId set for queue atomicity
+
+// ── Presence tracking (multi-tab safe) ──────────────────────────────────────
+const presenceMap  = new Map<string, Set<string>>(); // userId → Set<socketId>
+const socketToUser = new Map<string, string>();       // socketId → userId
+
+function markUserOnline(userId: string, socketId: string) {
+  let sockets = presenceMap.get(userId);
+  if (!sockets) { sockets = new Set(); presenceMap.set(userId, sockets); }
+  sockets.add(socketId);
+  socketToUser.set(socketId, userId);
+}
+
+function markUserOffline(socketId: string) {
+  const userId = socketToUser.get(socketId);
+  if (!userId) return;
+  socketToUser.delete(socketId);
+  const sockets = presenceMap.get(userId);
+  if (sockets) {
+    sockets.delete(socketId);
+    if (sockets.size === 0) presenceMap.delete(userId);
+  }
+}
+
+function isUserOnline(userId: string): boolean {
+  return (presenceMap.get(userId)?.size ?? 0) > 0;
+}
 const queues: Record<Mode, User[]> = { ranked: [], unranked: [], bullet: [] };
 const matches       = new Map<string, InternalGameState>();
 const activeMatches = new Map<string, string>(); // userId → matchId
@@ -219,9 +245,33 @@ function emitGameState(state: InternalGameState): void {
         ? getLegalActions(state, player.id)
         : undefined;
 
+    // Compute hero's best hand from flop onwards
+    let heroBestHand: string | null = null;
+    if (state.board.length >= 3 && !player.folded && state.holeCards[player.id]) {
+      const hc = state.holeCards[player.id] as [string, string];
+      heroBestHand = bestHand(hc, state.board).category;
+    }
+
+    // Reveal opponent's hole cards during all-in runout (no further action possible)
+    const isAllInRunout = state.toActId === "" && !state.handResult
+      && (state.players[0].stack === 0 || state.players[1].stack === 0);
+    const opponent = state.players.find((p) => p.id !== player.id);
+    const opponentHoleCards: string[] | null =
+      isAllInRunout && opponent ? (state.holeCards[opponent.id] ?? null) : null;
+
+    // Compute opponent's best hand during all-in runout
+    let opponentBestHand: string | null = null;
+    if (isAllInRunout && opponent && state.board.length >= 3 && !opponent.folded && state.holeCards[opponent.id]) {
+      const ohc = state.holeCards[opponent.id] as [string, string];
+      opponentBestHand = bestHand(ohc, state.board).category;
+    }
+
     socket.emit("game.state", {
       publicState:   { ...pub, legalActions: heroLegal },
       heroHoleCards: state.holeCards[player.id] ?? [],
+      heroBestHand,
+      opponentHoleCards,
+      opponentBestHand,
     });
   }
 
@@ -1227,17 +1277,13 @@ io.on("connection", (socket: Socket) => {
         socketId: socket.id,
         elo:      dbUser.elo,
       };
-      // ── Single-socket enforcement: disconnect old socket for same userId ──
+      // ── Multi-tab presence: allow multiple sockets per user ──
       const existingSocketId = userSockets.get(verifiedId);
       if (existingSocketId && existingSocketId !== socket.id) {
-        const oldSocket = io.sockets.sockets.get(existingSocketId);
-        if (oldSocket) {
-          oldSocket.emit("session.replaced", { reason: "Another tab or window connected." });
-          oldSocket.disconnect(true);
-        }
-        users.delete(existingSocketId);
+        users.delete(existingSocketId); // remove stale entry keyed by old socketId
       }
       userSockets.set(verifiedId, socket.id);
+      markUserOnline(verifiedId, socket.id);
 
       users.set(socket.id, user);
       socket.join(`user:${user.userId}`);
@@ -1424,10 +1470,7 @@ io.on("connection", (socket: Socket) => {
   // ── Friends & challenges ──────────────────────────────────────────────────
 
   socket.on("friends.status", ({ friendIds }: { friendIds: string[] }, ack: (online: string[]) => void) => {
-    const online = friendIds.filter((id) =>
-      [...users.values()].some((u) => u.userId === id),
-    );
-    ack(online);
+    ack(friendIds.filter(id => isUserOnline(id)));
   });
 
   socket.on(
@@ -1996,54 +2039,62 @@ io.on("connection", (socket: Socket) => {
   socket.on("disconnect", () => {
     const user = users.get(socket.id);
     if (user) {
-      clearQueueTimer(user.userId);
-      for (const m of ["ranked", "unranked", "bullet"] as Mode[]) {
-        const idx = queues[m].findIndex((u) => u.userId === user.userId);
-        if (idx !== -1) queues[m].splice(idx, 1);
-      }
+      markUserOffline(socket.id);
+      const stillOnline = isUserOnline(user.userId);
 
-      // Clean up pending challenges where this user is the challenger
-      for (const [cid, challenge] of pendingChallenges) {
-        if (challenge.fromUser.userId === user.userId) {
-          clearTimeout(challenge.timer);
-          pendingChallenges.delete(cid);
-          supabaseAdmin.from("pending_challenges").delete().eq("id", cid).then(({ error }) => {
-            if (error) console.error("[challenge] db delete (disconnect) error:", error.message);
-          });
-          // Notify target
-          io.to(`user:${challenge.toUserId}`).emit("challenge.expired", { challengeId: cid });
+      // Only clean up queue/challenges/match when ALL sockets are gone
+      if (!stillOnline) {
+        clearQueueTimer(user.userId);
+        for (const m of ["ranked", "unranked", "bullet"] as Mode[]) {
+          const idx = queues[m].findIndex((u) => u.userId === user.userId);
+          if (idx !== -1) queues[m].splice(idx, 1);
         }
-      }
 
-      // Tournament disconnect: don't auto-cancel/remove on socket disconnect
-      // because page navigation (dashboard → tournament page) causes a brief disconnect.
-      // Cleanup only happens via explicit tournament.leave.
-      // If in_progress: match disconnect handling below (30s grace → forfeit → handleTournamentMatchEnd) handles it.
-
-      // Handle active match disconnect
-      const matchId = activeMatches.get(user.userId);
-      if (matchId) {
-        const state = matches.get(matchId);
-        if (state && !state.ended) {
-          const isBotMatch = state.players.some((p) => p.id === BOT_ID);
-          if (isBotMatch) {
-            forfeitMatch(state, user.userId, "DISCONNECT");
-          } else {
-            // 30s grace period for reconnection
-            const timer = setTimeout(() => {
-              delete state.disconnectedPlayers[user.userId];
-              if (!state.ended) {
-                forfeitMatch(state, user.userId, "DISCONNECT");
-              }
-            }, 30_000);
-            state.disconnectedPlayers[user.userId] = { since: Date.now(), timer };
-            io.to(`match:${matchId}`).emit("player.disconnected", {
-              userId: user.userId,
-              username: user.username,
+        // Clean up pending challenges where this user is the challenger
+        for (const [cid, challenge] of pendingChallenges) {
+          if (challenge.fromUser.userId === user.userId) {
+            clearTimeout(challenge.timer);
+            pendingChallenges.delete(cid);
+            supabaseAdmin.from("pending_challenges").delete().eq("id", cid).then(({ error }) => {
+              if (error) console.error("[challenge] db delete (disconnect) error:", error.message);
             });
-            console.log(`[disconnect] ${user.username} — 30s grace period started`);
+            // Notify target
+            io.to(`user:${challenge.toUserId}`).emit("challenge.expired", { challengeId: cid });
           }
         }
+
+        // Tournament disconnect: don't auto-cancel/remove on socket disconnect
+        // because page navigation (dashboard → tournament page) causes a brief disconnect.
+        // Cleanup only happens via explicit tournament.leave.
+        // If in_progress: match disconnect handling below (30s grace → forfeit → handleTournamentMatchEnd) handles it.
+
+        // Handle active match disconnect
+        const matchId = activeMatches.get(user.userId);
+        if (matchId) {
+          const state = matches.get(matchId);
+          if (state && !state.ended) {
+            const isBotMatch = state.players.some((p) => p.id === BOT_ID);
+            if (isBotMatch) {
+              forfeitMatch(state, user.userId, "DISCONNECT");
+            } else {
+              // 30s grace period for reconnection
+              const timer = setTimeout(() => {
+                delete state.disconnectedPlayers[user.userId];
+                if (!state.ended) {
+                  forfeitMatch(state, user.userId, "DISCONNECT");
+                }
+              }, 30_000);
+              state.disconnectedPlayers[user.userId] = { since: Date.now(), timer };
+              io.to(`match:${matchId}`).emit("player.disconnected", {
+                userId: user.userId,
+                username: user.username,
+              });
+              console.log(`[disconnect] ${user.username} — 30s grace period started`);
+            }
+          }
+        }
+
+        queuedPlayers.delete(user.userId);
       }
 
       users.delete(socket.id);
@@ -2051,8 +2102,7 @@ io.on("connection", (socket: Socket) => {
       if (userSockets.get(user.userId) === socket.id) {
         userSockets.delete(user.userId);
       }
-      queuedPlayers.delete(user.userId);
-      console.log(`[disconnect] ${user.username}`);
+      console.log(`[disconnect] ${user.username}${stillOnline ? " (other tabs still open)" : ""}`);
     }
   });
 });

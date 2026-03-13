@@ -29,6 +29,9 @@ interface Props {
   onRaise?:      (amount: number) => void;
   onReveal?:     (cards: string[]) => void;
   onReady?:      () => void;
+  heroBestHand?:           string | null;
+  liveOpponentCards?:      [string, string] | null;
+  opponentBestHand?:       string | null;
   onForfeit?:              () => void;
   opponentDisconnectedAt?: number | null;
   pendingResult?: { winnerId: string; winnerUsername: string; ratingDelta: Record<string, number> | null; reason?: string } | null;
@@ -45,6 +48,9 @@ export function PokerTable({
   onRaise,
   onReveal,
   onReady,
+  heroBestHand,
+  liveOpponentCards,
+  opponentBestHand,
   onForfeit,
   opponentDisconnectedAt,
   pendingResult,
@@ -110,10 +116,12 @@ export function PokerTable({
   const opponentRevealedCards: string[] | null =
     activeHandResult?.showdown?.holeCards?.[opponent.userId]
       ? [...activeHandResult.showdown.holeCards[opponent.userId]]
-      : activeHandResult?.reveals?.[opponent.userId] ?? null;
+      : activeHandResult?.reveals?.[opponent.userId]
+      ?? liveOpponentCards
+      ?? null;
 
-  const opponentCategory = activeHandResult?.showdown?.hands?.[opponent.userId]?.category ?? null;
-  const heroCategory     = activeHandResult?.showdown?.hands?.[heroUserId]?.category ?? null;
+  const opponentCategory = activeHandResult?.showdown?.hands?.[opponent.userId]?.category ?? opponentBestHand ?? null;
+  const heroCategory     = activeHandResult?.showdown?.hands?.[heroUserId]?.category ?? heroBestHand ?? null;
 
   // Show reveal buttons only after a fold, before hero has revealed
   const showRevealButtons =
