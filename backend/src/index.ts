@@ -45,6 +45,8 @@ const RUNOUT_STREET_DELAY_MS   = 1_000;
 // ── In-memory store ───────────────────────────────────────────────────────────
 
 const users         = new Map<string, User>();
+const userSockets   = new Map<string, string>(); // userId → socketId
+const queuedPlayers = new Set<string>();          // userId set for queue atomicity
 const queues: Record<Mode, User[]> = { ranked: [], unranked: [], bullet: [] };
 const matches       = new Map<string, InternalGameState>();
 const activeMatches = new Map<string, string>(); // userId → matchId
@@ -145,6 +147,7 @@ function getBotDifficulty(mode: Mode, elo: number): BotDifficulty {
 function clearQueueTimer(userId: string): void {
   const t = queueTimers.get(userId);
   if (t) { clearTimeout(t); queueTimers.delete(userId); }
+  queuedPlayers.delete(userId);
 }
 
 // ── State serialization ───────────────────────────────────────────────────────
@@ -1224,6 +1227,18 @@ io.on("connection", (socket: Socket) => {
         socketId: socket.id,
         elo:      dbUser.elo,
       };
+      // ── Single-socket enforcement: disconnect old socket for same userId ──
+      const existingSocketId = userSockets.get(verifiedId);
+      if (existingSocketId && existingSocketId !== socket.id) {
+        const oldSocket = io.sockets.sockets.get(existingSocketId);
+        if (oldSocket) {
+          oldSocket.emit("session.replaced", { reason: "Another tab or window connected." });
+          oldSocket.disconnect(true);
+        }
+        users.delete(existingSocketId);
+      }
+      userSockets.set(verifiedId, socket.id);
+
       users.set(socket.id, user);
       socket.join(`user:${user.userId}`);
       console.log(`[auth] ${user.username} (${user.userId.slice(0, 8)}) elo=${user.elo}`);
@@ -1272,9 +1287,11 @@ io.on("connection", (socket: Socket) => {
     if (!user) return;
     if (activeMatches.has(user.userId)) return; // prevent re-queuing during active match
     if (playerTournament.has(user.userId)) return; // prevent queuing while in tournament
+    if (queuedPlayers.has(user.userId)) return;    // atomic guard: prevent race from multiple sockets
     const queueMode: Mode = mode === "unranked" ? "unranked" : mode === "bullet" ? "bullet" : "ranked";
     const q = queues[queueMode];
     if (q.some((u) => u.userId === user.userId)) return;
+    queuedPlayers.add(user.userId);
     q.push(user);
     console.log(`[queue:${queueMode}] ${user.username} joined — size: ${q.length}`);
     if (q.length >= 2) {
@@ -1288,6 +1305,7 @@ io.on("connection", (socket: Socket) => {
       // No opponent yet — pair with bot after 20 seconds
       const timer = setTimeout(() => {
         queueTimers.delete(user.userId);
+        queuedPlayers.delete(user.userId);
         const idx = q.findIndex((u) => u.userId === user.userId);
         if (idx === -1) return; // already matched or left
         q.splice(idx, 1);
@@ -2029,6 +2047,11 @@ io.on("connection", (socket: Socket) => {
       }
 
       users.delete(socket.id);
+      // Only remove from userSockets if this socket is still the current one
+      if (userSockets.get(user.userId) === socket.id) {
+        userSockets.delete(user.userId);
+      }
+      queuedPlayers.delete(user.userId);
       console.log(`[disconnect] ${user.username}`);
     }
   });

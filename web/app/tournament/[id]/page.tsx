@@ -27,6 +27,7 @@ export default function TournamentPage() {
   } | null>(null);
   const [readyPlayerIds, setReadyPlayerIds] = useState<Set<string>>(new Set());
   const [eliminated, setEliminated] = useState(false);
+  const [sessionReplaced, setSessionReplaced] = useState(false);
 
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -245,6 +246,10 @@ export default function TournamentPage() {
       socket.on("tournament.completed", ({ winnerId: wId }) => {
         setState((prev) => (prev ? { ...prev, status: "completed", winnerId: wId } : prev));
       });
+
+      socket.on("session.replaced", () => {
+        setSessionReplaced(true);
+      });
     });
 
     return () => {
@@ -285,6 +290,42 @@ export default function TournamentPage() {
       (res: { ok?: boolean; error?: string }) => {
         if (res.error) console.error("Start error:", res.error);
       },
+    );
+  }
+
+  if (sessionReplaced) {
+    return (
+      <div
+        style={{
+          minHeight:      "100vh",
+          display:        "flex",
+          flexDirection:  "column",
+          alignItems:     "center",
+          justifyContent: "center",
+          fontFamily:     "monospace",
+          gap:            "1rem",
+        }}
+      >
+        <p style={{ color: "var(--danger)", fontWeight: 700, fontSize: 15, margin: 0 }}>
+          This session was opened in another tab.
+        </p>
+        <button
+          onClick={() => router.push("/")}
+          style={{
+            background:   "transparent",
+            color:        "var(--primaryBtn)",
+            border:       "1px solid var(--primaryBtn)",
+            borderRadius: 4,
+            padding:      "0.6rem 1.25rem",
+            fontSize:     "0.9rem",
+            fontFamily:   "monospace",
+            fontWeight:   700,
+            cursor:       "pointer",
+          }}
+        >
+          Back to Lobby
+        </button>
+      </div>
     );
   }
 
