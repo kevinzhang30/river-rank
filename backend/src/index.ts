@@ -38,6 +38,8 @@ const BOT_QUEUE_TIMEOUT_MS = 20_000;
 
 const TURN_DURATION_MS         = 15_000;
 const BULLET_TURN_DURATION_MS  = 10_000;
+const NEXT_HAND_DELAY_MS       = 7_000;
+const BULLET_NEXT_HAND_DELAY_MS = 4_000;
 const RUNOUT_STREET_DELAY_MS   = 1_000;
 
 // ── In-memory store ───────────────────────────────────────────────────────────
@@ -347,13 +349,14 @@ function resolveShowdown(state: InternalGameState): void {
     for (const p of state.players) {
       chopDeltas[p.id] = p.stack - (state.handStartStacks[p.id] ?? p.stack);
     }
+    const nextHandDelay = state.mode === "bullet" ? BULLET_NEXT_HAND_DELAY_MS : NEXT_HAND_DELAY_MS;
     state.handResult = {
       handId:       `${state.matchId}-${state.handNumber}`,
       winnerUserId: null,
       pot:          chopPot,
       deltas:       chopDeltas,
       reason:       "SHOWDOWN",
-      showUntilMs:  Date.now() + 10_000,
+      showUntilMs:  Date.now() + nextHandDelay,
       showdown:     showdownInfo,
       reveals:      {},
     };
@@ -367,7 +370,8 @@ function resolveShowdown(state: InternalGameState): void {
     });
     emitGameState(state);
     state.handNumber++;
-    state.nextHandTimerId = setTimeout(() => startNextHand(state), 7_000);
+    const delay = state.mode === "bullet" ? BULLET_NEXT_HAND_DELAY_MS : NEXT_HAND_DELAY_MS;
+    state.nextHandTimerId = setTimeout(() => startNextHand(state), delay);
   } else {
     // Winner takes pot — show showdown board first, then award
     emitGameState(state);
@@ -669,7 +673,7 @@ function endHand(state: InternalGameState, winnerIndex: 0 | 1, reason: "FOLD" | 
     pot:          winAmount,
     deltas,
     reason,
-    showUntilMs:  Date.now() + 10_000,
+    showUntilMs:  Date.now() + (state.mode === "bullet" ? BULLET_NEXT_HAND_DELAY_MS : NEXT_HAND_DELAY_MS),
     showdown:     showdownInfo,
     reveals:      {},
   };
@@ -772,7 +776,8 @@ function endHand(state: InternalGameState, winnerIndex: 0 | 1, reason: "FOLD" | 
     console.log(`[blinds] hand #${state.handNumber} → ${state.smallBlind}/${state.bigBlind}`);
   }
 
-  state.nextHandTimerId = setTimeout(() => startNextHand(state), 7_000);
+  const delay = state.mode === "bullet" ? BULLET_NEXT_HAND_DELAY_MS : NEXT_HAND_DELAY_MS;
+  state.nextHandTimerId = setTimeout(() => startNextHand(state), delay);
 }
 
 function startNewHand(state: InternalGameState): void {
