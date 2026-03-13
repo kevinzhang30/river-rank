@@ -1780,6 +1780,11 @@ function PageInner() {
       router.push(`/game?mode=${mMode ?? "ranked"}`);
     });
 
+    socket.on("session.replaced", () => {
+      socket.disconnect();
+      dashboardSocketRef.current = null;
+    });
+
     return () => {
       socket.disconnect();
       dashboardSocketRef.current = null;

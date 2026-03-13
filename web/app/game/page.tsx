@@ -171,6 +171,10 @@ function GameView() {
         setOpponentDisconnectedAt(null);
       });
 
+      socket.on("session.replaced", () => {
+        setStatus("session replaced");
+      });
+
       socket.on("connect_error", (err) => {
         if (err.message === "unauthorized") {
           setNoAuth(true);
@@ -246,6 +250,44 @@ function GameView() {
 
   const tableHeroCards: [string, string] = liveHeroCards ?? mockHeroHoleCards;
   const debugState: unknown = liveState ?? rawBackendState ?? null;
+
+  // ── Session replaced ────────────────────────────────────────────────────────
+
+  if (status === "session replaced") {
+    return (
+      <div
+        style={{
+          minHeight:      "100vh",
+          display:        "flex",
+          flexDirection:  "column",
+          alignItems:     "center",
+          justifyContent: "center",
+          fontFamily:     "monospace",
+          gap:            "1rem",
+        }}
+      >
+        <p style={{ color: "var(--danger)", fontWeight: 700, fontSize: 15, margin: 0 }}>
+          This session was opened in another tab.
+        </p>
+        <button
+          onClick={() => router.push("/")}
+          style={{
+            background:   "transparent",
+            color:        "var(--primaryBtn)",
+            border:       "1px solid var(--primaryBtn)",
+            borderRadius: 4,
+            padding:      "0.6rem 1.25rem",
+            fontSize:     "0.9rem",
+            fontFamily:   "monospace",
+            fontWeight:   700,
+            cursor:       "pointer",
+          }}
+        >
+          Back to Lobby
+        </button>
+      </div>
+    );
+  }
 
   // ── No auth (ranked blocked) ────────────────────────────────────────────────
 
