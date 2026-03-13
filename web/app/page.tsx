@@ -245,6 +245,165 @@ function BulletPlayCard({ onPlay }: { onPlay: (mode: Mode) => void }) {
   );
 }
 
+// ── Tournament card ──────────────────────────────────────────────────────────
+
+function TournamentCard({
+  dashboardSocket,
+  onNavigate,
+}: {
+  dashboardSocket: Socket | null;
+  onNavigate: (path: string) => void;
+}) {
+  const [showCreate, setShowCreate] = useState(false);
+  const [joinCode, setJoinCode] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  function handleCreate(size: 4 | 8) {
+    if (!dashboardSocket?.connected) return;
+    setLoading(true);
+    setError(null);
+    dashboardSocket.emit(
+      "tournament.create",
+      { size },
+      (res: { tournamentId?: string; joinCode?: string; error?: string }) => {
+        setLoading(false);
+        if (res.error) {
+          setError(res.error);
+        } else if (res.tournamentId) {
+          onNavigate(`/tournament/${res.tournamentId}`);
+        }
+      },
+    );
+  }
+
+  function handleJoin() {
+    const code = joinCode.trim().toUpperCase();
+    if (!code || !dashboardSocket?.connected) return;
+    setLoading(true);
+    setError(null);
+    dashboardSocket.emit(
+      "tournament.join",
+      { joinCode: code },
+      (res: { tournamentId?: string; error?: string }) => {
+        setLoading(false);
+        if (res.error) {
+          setError(res.error);
+        } else if (res.tournamentId) {
+          onNavigate(`/tournament/${res.tournamentId}`);
+        }
+      },
+    );
+  }
+
+  return (
+    <Card>
+      <CardLabel>Tournament</CardLabel>
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.65rem" }}>
+        {!showCreate ? (
+          <button
+            onClick={() => setShowCreate(true)}
+            style={{
+              background:    "#8B5CF6",
+              color:         "#fff",
+              border:        "1px solid transparent",
+              borderRadius:  4,
+              padding:       "0.8rem 1.25rem",
+              fontSize:      "0.95rem",
+              fontFamily:    "monospace",
+              fontWeight:    700,
+              cursor:        "pointer",
+              letterSpacing: 0.5,
+              width:         "100%",
+              textAlign:     "left",
+            }}
+          >
+            Create Tournament
+            <span style={{ float: "right", fontWeight: 400, fontSize: 11, opacity: 0.75 }}>
+              Host a bracket
+            </span>
+          </button>
+        ) : (
+          <div style={{ display: "flex", gap: 8 }}>
+            {([4, 8] as const).map((size) => (
+              <button
+                key={size}
+                onClick={() => handleCreate(size)}
+                disabled={loading}
+                style={{
+                  flex:          1,
+                  background:    "#8B5CF6",
+                  color:         "#fff",
+                  border:        "1px solid transparent",
+                  borderRadius:  4,
+                  padding:       "0.7rem",
+                  fontSize:      "0.9rem",
+                  fontFamily:    "monospace",
+                  fontWeight:    700,
+                  cursor:        loading ? "not-allowed" : "pointer",
+                  letterSpacing: 0.3,
+                }}
+              >
+                {size} Players
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            value={joinCode}
+            onChange={(e) => { setJoinCode(e.target.value.toUpperCase()); setError(null); }}
+            onKeyDown={(e) => e.key === "Enter" && handleJoin()}
+            placeholder="JOIN CODE"
+            maxLength={6}
+            spellCheck={false}
+            style={{
+              flex:          1,
+              background:    "var(--surface2)",
+              border:        "1px solid var(--border)",
+              borderRadius:  4,
+              color:         "var(--text)",
+              padding:       "0.6rem 0.9rem",
+              fontSize:      "0.9rem",
+              fontFamily:    "monospace",
+              outline:       "none",
+              letterSpacing: 2,
+              textTransform: "uppercase",
+            }}
+          />
+          <button
+            onClick={handleJoin}
+            disabled={!joinCode.trim() || loading}
+            style={{
+              background:    !joinCode.trim() || loading ? "var(--surface2)" : "transparent",
+              color:         !joinCode.trim() || loading ? "var(--text3)" : "#8B5CF6",
+              border:        `1px solid ${!joinCode.trim() || loading ? "var(--border)" : "#8B5CF6"}`,
+              borderRadius:  4,
+              padding:       "0.6rem 1rem",
+              fontSize:      "0.9rem",
+              fontFamily:    "monospace",
+              fontWeight:    700,
+              cursor:        !joinCode.trim() || loading ? "not-allowed" : "pointer",
+              letterSpacing: 0.3,
+            }}
+          >
+            Join
+          </button>
+        </div>
+
+        {error && (
+          <div style={{ color: "var(--danger)", fontSize: 12 }}>{error}</div>
+        )}
+
+        <p style={{ margin: 0, color: "var(--text3)", fontSize: 11, paddingTop: "0.25rem" }}>
+          Single elimination · Unranked · 4 or 8 players
+        </p>
+      </div>
+    </Card>
+  );
+}
+
 // ── Account card ──────────────────────────────────────────────────────────────
 
 function AccountCard({ onSignOut }: { onSignOut: () => void }) {
@@ -914,7 +1073,7 @@ function ChooseUsernameView({
       <div style={{ textAlign: "center" }}>
         <div style={{ fontSize: 40, lineHeight: 1, marginBottom: 8, color: "var(--text)" }}>♠</div>
         <h1 className="wordmark" style={{ margin: 0, fontSize: 22, fontWeight: 800, color: "var(--text)" }}>
-          RiverRank
+          RiverRank.io
         </h1>
       </div>
 
@@ -1102,7 +1261,7 @@ function AuthView({
       <div style={{ textAlign: "center" }}>
         <div style={{ fontSize: 40, lineHeight: 1, marginBottom: 8, color: "var(--text)" }}>♠</div>
         <h1 className="wordmark" style={{ margin: 0, fontSize: 22, fontWeight: 800, color: "var(--text)" }}>
-          RiverRank
+          RiverRank.io
         </h1>
         <p style={{ margin: "0.5rem 0 0", color: "var(--text3)", fontSize: 12, letterSpacing: 1 }}>
           Ranked heads-up poker
@@ -1650,7 +1809,7 @@ function PageInner() {
           zIndex:         10,
         }}
       >
-        <span className="wordmark" style={{ fontWeight: 800, fontSize: 13 }}>RiverRank ♠</span>
+        <span className="wordmark" style={{ fontWeight: 800, fontSize: 13 }}>RiverRank.io ♠</span>
         <div ref={menuRef} style={{ position: "relative" }}>
           <button
             onClick={() => setMenuOpen(o => !o)}
@@ -1730,10 +1889,13 @@ function PageInner() {
             {profile && <ProfileCard profile={profile} />}
             <PlayCard onPlay={(mode) => router.push(`/game?mode=${mode}`)} />
             <BulletPlayCard onPlay={(mode) => router.push(`/game?mode=${mode}`)} />
+            <TournamentCard
+              dashboardSocket={dashboardSocketRef.current}
+              onNavigate={(path) => router.push(path)}
+            />
             <div ref={settingsRef}>
               <AccountCard onSignOut={signOut} />
             </div>
-            <RecentMatchesCard matches={recentMatches} />
           </div>
 
           {/* Right column */}
@@ -1755,6 +1917,7 @@ function PageInner() {
               onCancelChallenge={handleCancelChallenge}
               challengeWaiting={challengeWaiting}
             />
+            <RecentMatchesCard matches={recentMatches} />
           </div>
         </div>
 

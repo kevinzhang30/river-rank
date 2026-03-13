@@ -28,6 +28,8 @@ function GameView() {
   const router       = useRouter();
   const searchParams = useSearchParams();
   const mode         = (searchParams.get("mode") ?? "ranked") as Mode;
+  const tournamentId = searchParams.get("tournament");
+  const isTournamentMatch = !!tournamentId;
   const isMobile     = useIsMobile();
 
   const socketRef  = useRef<Socket | null>(null);
@@ -102,9 +104,13 @@ function GameView() {
           (res: { userId: string; username: string; elo: number }) => {
             userIdRef.current = res.userId;
             setUserId(res.userId);
-            setStatus("in queue…");
-            setQueueStartMs(Date.now());
-            socket.emit("queue.join", { mode });
+            if (isTournamentMatch) {
+              setStatus("waiting for tournament match…");
+            } else {
+              setStatus("in queue…");
+              setQueueStartMs(Date.now());
+              socket.emit("queue.join", { mode });
+            }
           },
         );
       });
@@ -206,7 +212,7 @@ function GameView() {
 
   function backToLobby() {
     socketRef.current?.disconnect();
-    router.push("/");
+    router.push(isTournamentMatch ? `/tournament/${tournamentId}` : "/");
   }
 
   const tableState: PublicGameState | null = useMemo(() => {
@@ -369,7 +375,7 @@ function GameView() {
                   letterSpacing: 0.3,
                 }}
               >
-                Back to Lobby
+                {isTournamentMatch ? "Back to Bracket" : "Back to Lobby"}
               </button>
             </div>
           </div>
@@ -395,7 +401,7 @@ function GameView() {
       <div style={{ textAlign: "center" }}>
         <div style={{ fontSize: 36, lineHeight: 1, marginBottom: 8, color: "var(--text)" }}>♠</div>
         <h1 className="wordmark" style={{ margin: 0, fontSize: 22, fontWeight: 800, color: "var(--text)" }}>
-          RiverRank
+          RiverRank.io
         </h1>
       </div>
 

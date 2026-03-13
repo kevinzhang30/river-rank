@@ -106,6 +106,8 @@ export interface InternalGameState {
   nextHandTimerId?: ReturnType<typeof setTimeout>;
   /** Tracks which players have clicked "Ready" to skip the inter-hand wait. */
   readyForNextHand: Record<string, boolean>;
+  tournamentId?:      string;
+  tournamentMatchId?: string;
 }
 
 // ── Hand result (broadcast after each hand ends) ─────────────────────────────

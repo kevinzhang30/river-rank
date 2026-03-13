@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "RiverRank",
+  title: "RiverRank.io",
   description: "Ranked poker duels"
 };
 

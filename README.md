@@ -1,8 +1,8 @@
-<img width="2000" height="2000" alt="RiverRank" src="https://github.com/user-attachments/assets/4f8b2206-3653-469c-ab57-3d0f457a8455" />
+<img width="2000" height="2000" alt="RiverRank.io" src="https://github.com/user-attachments/assets/4f8b2206-3653-469c-ab57-3d0f457a8455" />
 
 # [RiverRank.io](https://riverrank.io/)
 
-RiverRank is a real-time multiplayer heads-up poker platform featuring ranked Elo matchmaking, server-authoritative game logic, and authenticated user accounts.
+RiverRank.io is a real-time multiplayer heads-up poker platform featuring ranked Elo matchmaking, server-authoritative game logic, and authenticated user accounts.
 
 The application is designed as a production-style system demonstrating real-time communication, distributed state management, and secure backend validation.
 
@@ -10,7 +10,7 @@ The application is designed as a production-style system demonstrating real-time
 
 ## Description
 
-RiverRank allows users to:
+RiverRank.io allows users to:
 
 - Play real-time heads-up No-Limit Texas Hold’em
 - Compete in ranked or unranked matches
