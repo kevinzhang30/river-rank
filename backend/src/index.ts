@@ -219,9 +219,33 @@ function emitGameState(state: InternalGameState): void {
         ? getLegalActions(state, player.id)
         : undefined;
 
+    // Compute hero's best hand from flop onwards
+    let heroBestHand: string | null = null;
+    if (state.board.length >= 3 && !player.folded && state.holeCards[player.id]) {
+      const hc = state.holeCards[player.id] as [string, string];
+      heroBestHand = bestHand(hc, state.board).category;
+    }
+
+    // Reveal opponent's hole cards during all-in runout (no further action possible)
+    const isAllInRunout = state.toActId === "" && !state.handResult
+      && (state.players[0].stack === 0 || state.players[1].stack === 0);
+    const opponent = state.players.find((p) => p.id !== player.id);
+    const opponentHoleCards: string[] | null =
+      isAllInRunout && opponent ? (state.holeCards[opponent.id] ?? null) : null;
+
+    // Compute opponent's best hand during all-in runout
+    let opponentBestHand: string | null = null;
+    if (isAllInRunout && opponent && state.board.length >= 3 && !opponent.folded && state.holeCards[opponent.id]) {
+      const ohc = state.holeCards[opponent.id] as [string, string];
+      opponentBestHand = bestHand(ohc, state.board).category;
+    }
+
     socket.emit("game.state", {
       publicState:   { ...pub, legalActions: heroLegal },
       heroHoleCards: state.holeCards[player.id] ?? [],
+      heroBestHand,
+      opponentHoleCards,
+      opponentBestHand,
     });
   }
 
