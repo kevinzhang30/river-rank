@@ -167,6 +167,49 @@ export function PokerTable({
     setPreAction(null);
   }, [hero.isToAct, preAction]);
 
+  // Keyboard shortcuts (desktop only)
+  const readyVisible = !!activeHandResult && !(state.readyPlayers?.includes(heroUserId));
+
+  useEffect(() => {
+    if (isMobile) return;
+
+    function handleKeyDown(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+
+      const key = e.key.toLowerCase();
+
+      if (key === "f") {
+        if (hero.isToAct) {
+          e.preventDefault();
+          onFold?.();
+        } else if (showPreActions) {
+          e.preventDefault();
+          setPreAction(preAction === "fold-check" ? null : "fold-check");
+        }
+      } else if (key === "c" && hero.isToAct) {
+        e.preventDefault();
+        if (legal?.canCheck) onCheck?.();
+        else if (legal?.canCall) onCall?.();
+      } else if (key === "r") {
+        e.preventDefault();
+        const input = document.getElementById(
+          hero.isToAct ? "raise-input" : "pre-raise-input"
+        );
+        if (input) (input as HTMLInputElement).focus();
+      } else if (key === "a" && hero.isToAct && legal?.maxRaiseTo) {
+        e.preventDefault();
+        onRaise?.(legal.maxRaiseTo);
+      } else if (key === " " && readyVisible) {
+        e.preventDefault();
+        onReady?.();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isMobile, hero.isToAct, legal, readyVisible, showPreActions, preAction, onFold, onCheck, onCall, onRaise, onReady]);
+
   return (
     <div
       style={{
@@ -596,6 +639,38 @@ export function PokerTable({
         showPreActions={showPreActions}
         preBetInvalid={preBetInvalid}
       />
+
+      {!isMobile && (hero.isToAct || showPreActions || readyVisible) && (
+        <div
+          style={{
+            display:        "flex",
+            gap:            16,
+            justifyContent: "center",
+            padding:        "4px 20px 8px",
+            background:     "var(--surface)",
+            fontSize:       10,
+            fontFamily:     "monospace",
+            color:          "var(--text3)",
+            letterSpacing:  1,
+          }}
+        >
+          {hero.isToAct && (
+            <>
+              <span>[F] FOLD</span>
+              <span>[C] {legal?.canCheck ? "CHECK" : "CALL"}</span>
+              {legal?.minRaiseTo && <span>[R] RAISE</span>}
+              {legal?.maxRaiseTo && <span>[A] ALL-IN</span>}
+            </>
+          )}
+          {showPreActions && !hero.isToAct && (
+            <>
+              <span>[F] PRE-FOLD</span>
+              <span>[R] PRE-RAISE</span>
+            </>
+          )}
+          {readyVisible && <span>[SPACE] READY</span>}
+        </div>
+      )}
 
       {showCheatSheet && <HandCheatSheet onClose={() => setShowCheatSheet(false)} />}
     </div>

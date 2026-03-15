@@ -15,7 +15,7 @@ create policy "profiles: user can set up profile"
     and wins            is not distinct from (select wins            from public.profiles where id = auth.uid())
     and losses          is not distinct from (select losses          from public.profiles where id = auth.uid())
     and friend_code     is not distinct from (select friend_code     from public.profiles where id = auth.uid())
-    and tournament_wins is not distinct from (select tournament_wins from public.profiles where id = auth.uid())
+    -- and tournament_wins is not distinct from (select tournament_wins from public.profiles where id = auth.uid())
   );
 
 -- Policy 2: Subsequent username changes (username already set)
@@ -29,5 +29,5 @@ create policy "profiles: user can change username"
     and losses          is not distinct from (select losses          from public.profiles where id = auth.uid())
     and country         is not distinct from (select country         from public.profiles where id = auth.uid())
     and friend_code     is not distinct from (select friend_code     from public.profiles where id = auth.uid())
-    and tournament_wins is not distinct from (select tournament_wins from public.profiles where id = auth.uid())
+    -- and tournament_wins is not distinct from (select tournament_wins from public.profiles where id = auth.uid())
   );

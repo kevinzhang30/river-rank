@@ -226,6 +226,7 @@ export function ActionBar({ legal, pot, bigBlind, onFold, onCheck, onCall, onRai
                   setPreBetInput("");
                 }
               }}
+              id="pre-raise-input"
               style={{
                 width:        isMobile ? 64 : 80,
                 height:       34,
@@ -333,6 +334,7 @@ export function ActionBar({ legal, pot, bigBlind, onFold, onCheck, onCall, onRai
             onFocus={(e) => e.target.select()}
             onBlur={clampInput}
             onKeyDown={(e) => e.key === "Enter" && handleRaiseSubmit()}
+            id="raise-input"
             style={{
               width:        isMobile ? 64 : 80,
               height:       34,

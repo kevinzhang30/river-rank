@@ -225,21 +225,10 @@ function GameView() {
   }
 
   function backToLobby() {
+    socketRef.current?.disconnect();
     if (isTournamentMatch) {
-      socketRef.current?.emit(
-        "tournament.get_state",
-        { tournamentId },
-        (res: any) => {
-          socketRef.current?.disconnect();
-          if (res && !res.error && res.status !== "completed") {
-            router.push(`/tournament/${tournamentId}`);
-          } else {
-            router.push("/");
-          }
-        },
-      );
+      router.push(`/tournament/${tournamentId}`);
     } else {
-      socketRef.current?.disconnect();
       router.push("/");
     }
   }
