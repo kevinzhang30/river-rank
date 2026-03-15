@@ -37,8 +37,11 @@ export function eloUpdate(
   const eB = 1 - eA; // expectedScore(rB, rA)
   const resultB = (1 - resultA) as Result;
 
-  const deltaA = k * (resultA - eA);
-  const deltaB = k * (resultB - eB); // always === -deltaA
+  let deltaA = k * (resultA - eA);
+  // Ensure every win awards at least 5 Elo
+  if (resultA === 1) deltaA = Math.max(deltaA, 5);
+  else if (resultA === 0) deltaA = Math.min(deltaA, -5);
+  const deltaB = -deltaA;
 
   return {
     newRatingA: rA + deltaA,
