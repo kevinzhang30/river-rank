@@ -7,14 +7,17 @@ interface BracketViewProps {
   size: 4 | 8;
   currentUserId: string | null;
   participants: { userId: string; username: string; seed: number | null }[];
+  onSpectate?: (tournamentMatchId: string) => void;
 }
 
 function MatchCard({
   match,
   currentUserId,
+  onSpectate,
 }: {
   match: TournamentMatchInfo;
   currentUserId: string | null;
+  onSpectate?: (tournamentMatchId: string) => void;
 }) {
   const isUserMatch =
     match.p1?.userId === currentUserId || match.p2?.userId === currentUserId;
@@ -60,9 +63,11 @@ function MatchCard({
 
   const p1Winner = match.winnerId === match.p1?.userId;
   const p2Winner = match.winnerId === match.p2?.userId;
+  const canSpectate = match.status === "in_progress" && !isUserMatch && !!onSpectate;
 
   return (
     <div
+      onClick={canSpectate ? () => onSpectate!(match.id) : undefined}
       style={{
         background: "var(--surface)",
         border: `1px solid ${isUserMatch ? "var(--primaryBtn)" : "var(--border)"}`,
@@ -70,15 +75,33 @@ function MatchCard({
         overflow: "hidden",
         minWidth: 120,
         borderLeft: `3px solid ${statusColor}`,
+        cursor: canSpectate ? "pointer" : undefined,
+        position: "relative",
       }}
     >
+      {canSpectate && (
+        <div
+          style={{
+            position: "absolute",
+            top: 2,
+            right: 4,
+            fontSize: 8,
+            fontWeight: 700,
+            letterSpacing: 1,
+            color: "#F59E0B",
+            textTransform: "uppercase",
+          }}
+        >
+          LIVE
+        </div>
+      )}
       {playerRow(match.p1, p1Winner, p2Winner)}
       {playerRow(match.p2, p2Winner, p1Winner)}
     </div>
   );
 }
 
-export function BracketView({ matches, size, currentUserId }: BracketViewProps) {
+export function BracketView({ matches, size, currentUserId, onSpectate }: BracketViewProps) {
   const totalRounds = Math.log2(size);
   const rounds: TournamentMatchInfo[][] = [];
 
@@ -130,7 +153,7 @@ export function BracketView({ matches, size, currentUserId }: BracketViewProps) 
             }}
           >
             {roundMatches.map((match) => (
-              <MatchCard key={match.id} match={match} currentUserId={currentUserId} />
+              <MatchCard key={match.id} match={match} currentUserId={currentUserId} onSpectate={onSpectate} />
             ))}
           </div>
         </div>

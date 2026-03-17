@@ -36,6 +36,7 @@ interface Props {
   opponentDisconnectedAt?: number | null;
   pendingResult?: { winnerId: string; winnerUsername: string; ratingDelta: Record<string, number> | null; reason?: string } | null;
   onViewResults?: () => void;
+  spectatorMode?: boolean;
 }
 
 export function PokerTable({
@@ -55,6 +56,7 @@ export function PokerTable({
   opponentDisconnectedAt,
   pendingResult,
   onViewResults,
+  spectatorMode,
 }: Props) {
   const [, setTick] = useState(0);
   const handResultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -171,7 +173,7 @@ export function PokerTable({
   const readyVisible = !!activeHandResult && !(state.readyPlayers?.includes(heroUserId));
 
   useEffect(() => {
-    if (isMobile) return;
+    if (isMobile || spectatorMode) return;
 
     function handleKeyDown(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement)?.tagName;
@@ -213,7 +215,7 @@ export function PokerTable({
   return (
     <div
       style={{
-        height:        "100dvh",
+        height:        spectatorMode ? "100%" : "100dvh",
         display:       "flex",
         flexDirection: "column",
         background:    "var(--bg)",
@@ -284,12 +286,16 @@ export function PokerTable({
             <span
               style={{
                 background:    "transparent",
-                color:         state.mode === "ranked"
+                color:         spectatorMode
+                  ? "#F59E0B"
+                  : state.mode === "ranked"
                   ? "var(--primaryBtn)"
                   : state.mode === "bullet"
                   ? "#F59E0B"
                   : "var(--text3)",
-                border:        state.mode === "ranked"
+                border:        spectatorMode
+                  ? "1px solid #F59E0B"
+                  : state.mode === "ranked"
                   ? "1px solid var(--primaryBtn)"
                   : state.mode === "bullet"
                   ? "1px solid #F59E0B"
@@ -302,10 +308,10 @@ export function PokerTable({
                 textTransform: "uppercase",
               }}
             >
-              {state.mode}
+              {spectatorMode ? "SPECTATING" : state.mode}
             </span>
           )}
-          <button
+          {!spectatorMode && <button
             onClick={() => {
               if (forfeitConfirm) {
                 onForfeit?.();
@@ -333,7 +339,7 @@ export function PokerTable({
             }}
           >
             {forfeitConfirm ? "Confirm?" : "Forfeit"}
-          </button>
+          </button>}
           <button
             onClick={() => setShowCheatSheet(true)}
             title="Hand rankings"
@@ -626,7 +632,7 @@ export function PokerTable({
       </div>
 
       {/* ── Action bar ───────────────────────────────────────────────── */}
-      <ActionBar
+      {!spectatorMode && <ActionBar
         legal={legal}
         pot={state.pot}
         bigBlind={state.bigBlind}
@@ -638,9 +644,9 @@ export function PokerTable({
         onPreAction={setPreAction}
         showPreActions={showPreActions}
         preBetInvalid={preBetInvalid}
-      />
+      />}
 
-      {!isMobile && (hero.isToAct || showPreActions || readyVisible) && (
+      {!spectatorMode && !isMobile && (hero.isToAct || showPreActions || readyVisible) && (
         <div
           style={{
             display:        "flex",
