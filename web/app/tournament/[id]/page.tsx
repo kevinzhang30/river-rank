@@ -5,8 +5,9 @@ import { useRouter, useParams } from "next/navigation";
 import { io, Socket } from "socket.io-client";
 import { supabase } from "@/lib/supabaseClient";
 import { BracketView } from "@/ui/BracketView";
+import { PokerTable } from "@/ui/PokerTable";
 import { useIsMobile } from "@/lib/useIsMobile";
-import type { TournamentState, TournamentMatchInfo } from "@/ui/types";
+import type { TournamentState, TournamentMatchInfo, PublicGameState } from "@/ui/types";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4000";
 
@@ -28,9 +29,16 @@ export default function TournamentPage() {
   const [readyPlayerIds, setReadyPlayerIds] = useState<Set<string>>(new Set());
   const [eliminated, setEliminated] = useState(false);
   const [sessionReplaced, setSessionReplaced] = useState(false);
+  const [spectating, setSpectating] = useState<{ tournamentMatchId: string; matchId: string } | null>(null);
+  const [spectateState, setSpectateState] = useState<PublicGameState | null>(null);
+  const [spectateAllInCards, setSpectateAllInCards] = useState<Record<string, [string, string]> | null>(null);
+  const [spectateBestHands, setSpectateBestHands] = useState<Record<string, string> | null>(null);
+  const [spectateEnded, setSpectateEnded] = useState<{ winnerId: string; winnerUsername: string } | null>(null);
 
   const stateRef = useRef(state);
   stateRef.current = state;
+  const spectatingRef = useRef(spectating);
+  spectatingRef.current = spectating;
 
   const fetchState = useCallback((socket: Socket, uid: string) => {
     socket.emit(
@@ -160,6 +168,17 @@ export default function TournamentPage() {
 
         // Check if it's my match
         if (p1Id === uid || p2Id === uid) {
+          // Auto-stop spectating if we were watching another match
+          const cur_spectating = spectatingRef.current;
+          if (cur_spectating) {
+            socket.emit("spectate.leave", { matchId: cur_spectating.matchId });
+            setSpectating(null);
+            setSpectateState(null);
+            setSpectateAllInCards(null);
+            setSpectateBestHands(null);
+            setSpectateEnded(null);
+          }
+
           const opponentId = p1Id === uid ? p2Id : p1Id;
           const cur = stateRef.current;
           const opponentName =
@@ -247,6 +266,29 @@ export default function TournamentPage() {
         setState((prev) => (prev ? { ...prev, status: "completed", winnerId: wId } : prev));
       });
 
+      socket.on("spectate.state", ({ publicState, allInCards, bestHands }: {
+        publicState: PublicGameState;
+        allInCards: Record<string, [string, string]> | null;
+        bestHands: Record<string, string> | null;
+      }) => {
+        setSpectateState(publicState);
+        setSpectateAllInCards(allInCards);
+        setSpectateBestHands(bestHands);
+      });
+
+      socket.on("spectate.ended", ({ winnerId: wId, winnerUsername: wName }: {
+        winnerId: string; winnerUsername: string;
+      }) => {
+        setSpectateEnded({ winnerId: wId, winnerUsername: wName });
+        setTimeout(() => {
+          setSpectating(null);
+          setSpectateState(null);
+          setSpectateAllInCards(null);
+          setSpectateBestHands(null);
+          setSpectateEnded(null);
+        }, 3000);
+      });
+
       socket.on("session.replaced", () => {
         setSessionReplaced(true);
       });
@@ -281,6 +323,30 @@ export default function TournamentPage() {
       { tournamentId },
       () => router.replace("/"),
     );
+  }
+
+  function handleSpectate(tournamentMatchId: string) {
+    socketRef.current?.emit(
+      "spectate.join",
+      { tournamentMatchId },
+      (res: { ok?: boolean; matchId?: string; error?: string }) => {
+        if (res.ok && res.matchId) {
+          setSpectating({ tournamentMatchId, matchId: res.matchId });
+          setSpectateEnded(null);
+        }
+      },
+    );
+  }
+
+  function handleStopSpectating() {
+    if (spectating) {
+      socketRef.current?.emit("spectate.leave", { matchId: spectating.matchId });
+    }
+    setSpectating(null);
+    setSpectateState(null);
+    setSpectateAllInCards(null);
+    setSpectateBestHands(null);
+    setSpectateEnded(null);
   }
 
   function handleStart() {
@@ -810,8 +876,92 @@ export default function TournamentPage() {
             size={state.size}
             currentUserId={userId}
             participants={state.participants}
+            onSpectate={handleSpectate}
           />
         </div>
+
+        {/* Spectator view */}
+        {spectating && spectateState && (
+          <div
+            style={{
+              background: "var(--surface)",
+              border: "1px solid #F59E0B",
+              borderRadius: 8,
+              overflow: "hidden",
+              position: "relative",
+            }}
+          >
+            {/* Spectator header */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "0.5rem 1rem",
+                borderBottom: "1px solid var(--border)",
+                background: "var(--surface2)",
+              }}
+            >
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 2, color: "#F59E0B", textTransform: "uppercase" }}>
+                Spectating
+              </span>
+              <button
+                onClick={handleStopSpectating}
+                style={{
+                  background: "transparent",
+                  color: "var(--text3)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 3,
+                  padding: "2px 10px",
+                  fontSize: 10,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  fontFamily: "monospace",
+                  letterSpacing: 1,
+                  textTransform: "uppercase",
+                }}
+              >
+                Close
+              </button>
+            </div>
+
+            {/* Match ended overlay */}
+            {spectateEnded && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  background: "rgba(0,0,0,0.7)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  zIndex: 10,
+                }}
+              >
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: 12, color: "var(--text3)", letterSpacing: 2, marginBottom: 8, textTransform: "uppercase" }}>
+                    Match Over
+                  </div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "var(--success)" }}>
+                    {spectateEnded.winnerUsername} wins
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div style={{ height: "min(70vh, 600px)" }}>
+              <PokerTable
+                state={spectateState}
+                heroUserId=""
+                heroHoleCards={spectateAllInCards?.[spectateState.players[1]?.userId] ?? null}
+                spectatorMode={true}
+                liveOpponentCards={spectateAllInCards?.[spectateState.players[0]?.userId] ?? null}
+                heroBestHand={spectateBestHands?.[spectateState.players[1]?.userId] ?? null}
+                opponentBestHand={spectateBestHands?.[spectateState.players[0]?.userId] ?? null}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Back / Leave button */}
         {state.status === "completed" ? (

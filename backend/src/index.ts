@@ -109,6 +109,7 @@ interface TournamentState {
 }
 const tournaments      = new Map<string, TournamentState>();
 const playerTournament = new Map<string, string>();  // userId → tournamentId
+const tournamentMatchToGameMatch = new Map<string, string>(); // tournamentMatchId → game matchId
 const joinCodeIndex    = new Map<string, string>();  // code → tournamentId
 
 // Per-tournament lock to serialize handleTournamentMatchEnd calls (prevents race conditions)
@@ -222,6 +223,38 @@ function toPublicState(state: InternalGameState) {
   };
 }
 
+function emitSpectatorState(state: InternalGameState): void {
+  const pub = toPublicState(state);
+  // Strip private info: no legal actions, no ready players
+  const spectatorPub = { ...pub, legalActions: undefined, readyPlayers: undefined };
+
+  // During all-in runout, include both players' hole cards
+  const isAllInRunout = state.toActId === "" && !state.handResult
+    && (state.players[0].stack === 0 || state.players[1].stack === 0);
+
+  let allInCards: Record<string, [string, string]> | null = null;
+  let bestHands: Record<string, string> | null = null;
+  if (isAllInRunout) {
+    allInCards = {};
+    bestHands = {};
+    for (const p of state.players) {
+      const hc = state.holeCards[p.id];
+      if (hc) {
+        allInCards[p.id] = hc as [string, string];
+        if (state.board.length >= 3 && !p.folded) {
+          bestHands[p.id] = bestHand(hc as [string, string], state.board).category;
+        }
+      }
+    }
+  }
+
+  io.to(`spectate:${state.matchId}`).emit("spectate.state", {
+    publicState: spectatorPub,
+    allInCards,
+    bestHands,
+  });
+}
+
 // ── Turn timer helpers ────────────────────────────────────────────────────────
 
 function resetTurnTimer(state: InternalGameState): void {
@@ -275,6 +308,9 @@ function emitGameState(state: InternalGameState): void {
       opponentBestHand,
     });
   }
+
+  // Emit spectator state to spectate room
+  emitSpectatorState(state);
 
   // Schedule bot turn if it's the bot's turn to act
   if (state.toActId === BOT_ID && state.street !== "SHOWDOWN" && !state.ended) {
@@ -655,6 +691,7 @@ function forfeitMatch(
   // Clean up maps
   matches.delete(state.matchId);
   botDifficulties.delete(state.matchId);
+  if (state.tournamentMatchId) tournamentMatchToGameMatch.delete(state.tournamentMatchId);
   for (const p of state.players) {
     activeMatches.delete(p.id);
   }
@@ -662,6 +699,9 @@ function forfeitMatch(
   const matchId    = state.matchId;
   const ranked     = state.mode === "ranked";
   const isBotMatch = state.players.some((p) => p.id === BOT_ID);
+
+  // Notify spectators
+  io.to(`spectate:${matchId}`).emit("spectate.ended", { winnerId, winnerUsername });
 
   if (isBotMatch) {
     io.to(`match:${matchId}`).emit("match.ended", {
@@ -757,6 +797,7 @@ function endHand(state: InternalGameState, winnerIndex: 0 | 1, reason: "FOLD" | 
 
     // Remove from active matches immediately so no further actions are accepted.
     matches.delete(state.matchId);
+    if (state.tournamentMatchId) tournamentMatchToGameMatch.delete(state.tournamentMatchId);
     for (const p of state.players) {
       activeMatches.delete(p.id);
     }
@@ -765,6 +806,9 @@ function endHand(state: InternalGameState, winnerIndex: 0 | 1, reason: "FOLD" | 
     const existingBotTimer = botTimers.get(state.matchId);
     if (existingBotTimer) { clearTimeout(existingBotTimer); botTimers.delete(state.matchId); }
     botDifficulties.delete(state.matchId);
+
+    // Notify spectators
+    io.to(`spectate:${state.matchId}`).emit("spectate.ended", { winnerId: winner.id, winnerUsername: winner.username });
 
     const matchId        = state.matchId;
     const winnerUsername = winner.username;
@@ -1054,6 +1098,12 @@ async function launchTournamentMatch(tournamentId: string, tournamentMatchId: st
     .eq('id', tournamentMatchId);
 
   await createMatch(p1User, p2User, 'unranked', undefined, { tournamentId, tournamentMatchId });
+
+  // Map tournament match to game match for spectators
+  const gameMatchId = activeMatches.get(p1Id);
+  if (gameMatchId) {
+    tournamentMatchToGameMatch.set(tournamentMatchId, gameMatchId);
+  }
 
   io.to(`tournament:${tournamentId}`).emit('tournament.match_started', {
     tournamentMatchId, p1Id, p2Id,
@@ -2033,6 +2083,65 @@ io.on("connection", (socket: Socket) => {
     }
 
     ack({ ok: true });
+  });
+
+  // ── Spectate ──────────────────────────────────────────────────────────────
+
+  socket.on("spectate.join", (
+    { tournamentMatchId }: { tournamentMatchId: string },
+    ack: (r: { ok?: boolean; matchId?: string; error?: string }) => void,
+  ) => {
+    const user = users.get(socket.id);
+    if (!user) return ack({ error: "Not authenticated" });
+
+    // Validate user is in a tournament
+    const tournamentId = playerTournament.get(user.userId);
+    if (!tournamentId) return ack({ error: "Not in a tournament" });
+
+    // Look up game matchId
+    const matchId = tournamentMatchToGameMatch.get(tournamentMatchId);
+    if (!matchId) return ack({ error: "Match not found or not in progress" });
+
+    // Reject if user is a player in this match (anti-cheat)
+    const state = matches.get(matchId);
+    if (state && state.players.some((p) => p.id === user.userId)) {
+      return ack({ error: "Cannot spectate your own match" });
+    }
+
+    socket.join(`spectate:${matchId}`);
+
+    // Immediately send current state
+    if (state) {
+      const pub = toPublicState(state);
+      const spectatorPub = { ...pub, legalActions: undefined, readyPlayers: undefined };
+
+      const isAllInRunout = state.toActId === "" && !state.handResult
+        && (state.players[0].stack === 0 || state.players[1].stack === 0);
+      let allInCards: Record<string, [string, string]> | null = null;
+      let bestHands: Record<string, string> | null = null;
+      if (isAllInRunout) {
+        allInCards = {};
+        bestHands = {};
+        for (const p of state.players) {
+          const hc = state.holeCards[p.id];
+          if (hc) {
+            allInCards[p.id] = hc as [string, string];
+            if (state.board.length >= 3 && !p.folded) {
+              bestHands[p.id] = bestHand(hc as [string, string], state.board).category;
+            }
+          }
+        }
+      }
+
+      socket.emit("spectate.state", { publicState: spectatorPub, allInCards, bestHands });
+    }
+
+    console.log(`[spectate] ${user.username} spectating match ${matchId.slice(0, 8)}`);
+    ack({ ok: true, matchId });
+  });
+
+  socket.on("spectate.leave", ({ matchId }: { matchId: string }) => {
+    socket.leave(`spectate:${matchId}`);
   });
 
   // ── Disconnect ─────────────────────────────────────────────────────────────
