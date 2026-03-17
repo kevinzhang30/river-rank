@@ -16,7 +16,10 @@ export interface EloResult {
  */
 export function eloUpdate(rA: number, rB: number, resultA: number, k = K): EloResult {
   const expected = 1 / (1 + Math.pow(10, (rB - rA) / 400));
-  const deltaA   = Math.round(k * (resultA - expected));
+  let deltaA   = Math.round(k * (resultA - expected));
+  // Ensure every win awards at least 5 Elo
+  if (resultA === 1) deltaA = Math.max(deltaA, 5);
+  else if (resultA === 0) deltaA = Math.min(deltaA, -5);
   const deltaB   = -deltaA;
   return { newA: rA + deltaA, newB: rB + deltaB, deltaA, deltaB };
 }

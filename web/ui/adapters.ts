@@ -59,6 +59,7 @@ export function adaptBackendState(
       isDealer: i === 0,
       isToAct: p.userId === heroUserId,
       folded: false,
+      elo: 1000,                           // unknown — placeholder
     })
   );
 

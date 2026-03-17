@@ -96,6 +96,7 @@ describe("eloUpdate — zero-sum", () => {
     [1200, 800,  1],
     [800,  1200, 0],
     [1500, 1500, 0.5],
+    [2000, 500,  1],
   ];
 
   it.each(cases)(
@@ -118,17 +119,42 @@ describe("eloUpdate — K-factor", () => {
     expect(k64.deltaA).toBeGreaterThan(k32.deltaA);
   });
 
-  it("k=0 produces zero change", () => {
+  it("k=0 still awards minimum 5 for a win", () => {
     const { deltaA, newRatingA, newRatingB } = eloUpdate(1200, 800, 1, 0);
-    expect(deltaA).toBe(0);
-    expect(newRatingA).toBe(1200);
-    expect(newRatingB).toBe(800);
+    expect(deltaA).toBe(5);
+    expect(newRatingA).toBe(1205);
+    expect(newRatingB).toBe(795);
   });
 
-  it("delta scales linearly with K (same expected score)", () => {
-    const k16 = eloUpdate(1000, 1000, 1, 16);
-    const k32 = eloUpdate(1000, 1000, 1, 32);
+  it("delta scales linearly with K for draws (same expected score)", () => {
+    const k16 = eloUpdate(1200, 1000, 0.5, 16);
+    const k32 = eloUpdate(1200, 1000, 0.5, 32);
     expect(k32.deltaA).toBeCloseTo(k16.deltaA * 2, 8);
+  });
+});
+
+// ── eloUpdate — minimum gain floor ───────────────────────────────────────────
+
+describe("eloUpdate — minimum gain of 5", () => {
+  it("extreme gap: favourite (2000 vs 500) still gains at least 5", () => {
+    const { deltaA } = eloUpdate(2000, 500, 1);
+    expect(deltaA).toBeGreaterThanOrEqual(5);
+  });
+
+  it("extreme gap: underdog loss still loses at least 5", () => {
+    const { deltaA } = eloUpdate(500, 2000, 0);
+    expect(deltaA).toBeLessThanOrEqual(-5);
+  });
+
+  it("normal win is unaffected by the floor", () => {
+    const { deltaA } = eloUpdate(1000, 1000, 1);
+    expect(deltaA).toBeCloseTo(16, 5);
+  });
+
+  it("draws are not affected by the floor", () => {
+    const { deltaA } = eloUpdate(2000, 500, 0.5);
+    // Draw delta for favourite should be negative, no floor applied
+    expect(deltaA).toBeLessThan(0);
   });
 });
 

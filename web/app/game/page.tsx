@@ -20,6 +20,7 @@ const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4000";
 interface Opponent {
   userId:   string;
   username: string;
+  elo:      number;
 }
 
 // ── Main game component ───────────────────────────────────────────────────────

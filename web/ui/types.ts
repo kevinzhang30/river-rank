@@ -9,6 +9,7 @@ export interface PublicPlayer {
   isDealer: boolean;
   isToAct:  boolean;
   folded:   boolean;
+  elo:      number;
 }
 
 export interface LegalActions {
