@@ -1253,7 +1253,7 @@ function ChooseUsernameView({
         setSubmitError(error.message);
       }
     } else {
-      onDone(trimmed, elo);
+      onDone(trimmed, level === "beginner" ? 600 : 1200);
     }
   }
 
