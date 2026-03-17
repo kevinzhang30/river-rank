@@ -88,7 +88,12 @@ export function PlayerPanel({ player, isHero, holeCards, handResult, turnDeadlin
         gap:           isMobile ? 4 : 8,
         minWidth:      isMobile ? 0 : 220,
         opacity,
-        transition:    "border-color 0.15s, opacity 0.15s, background 0.15s",
+        boxShadow:     active && !handResult
+          ? isUrgent
+            ? "0 0 12px 2px rgba(239, 68, 68, 0.35)"
+            : "0 0 12px 2px rgba(59, 91, 219, 0.35)"
+          : "none",
+        transition:    "border-color 0.15s, opacity 0.15s, background 0.15s, box-shadow 0.15s",
       }}
     >
       {/* Name row */}
@@ -105,6 +110,11 @@ export function PlayerPanel({ player, isHero, holeCards, handResult, turnDeadlin
         >
           {player.username}
         </span>
+        {player.elo != null && (
+          <span style={{ color: "var(--text3)", fontSize: 11, fontWeight: 500 }}>
+            ({player.elo})
+          </span>
+        )}
         {player.folded && !handResult && (
           <span style={{ color: "var(--text3)", fontSize: 10, letterSpacing: 0.5 }}>FOLDED</span>
         )}
@@ -218,6 +228,12 @@ export function PlayerPanel({ player, isHero, holeCards, handResult, turnDeadlin
       }}
     >
       {!isHero && cards}
+      {isHero && !handResult && active && (
+        <span style={{ color: "var(--primaryBtn)", fontSize: 10, fontWeight: 800, letterSpacing: 1.5 }}>YOUR TURN</span>
+      )}
+      {isHero && !handResult && !active && !player.folded && (
+        <span style={{ color: "var(--text3)", fontSize: 10, fontWeight: 800, letterSpacing: 1.5 }}>WAITING</span>
+      )}
       {infoBox}
       {isHero && cards}
     </div>

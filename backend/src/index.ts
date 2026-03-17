@@ -198,6 +198,7 @@ function toPublicState(state: InternalGameState) {
       isDealer: p.id === state.dealerId,
       isToAct:  p.id === state.toActId && !p.folded && state.street !== "SHOWDOWN",
       folded:   p.folded,
+      elo:      state.playerElos[p.id] ?? 1000,
     })),
     log:        state.log.map((e) => ({
       username: e.username,
@@ -964,10 +965,10 @@ async function createMatch(
   }
 
   io.to(`user:${sbUser.userId}`).emit("match.found", {
-    matchId, opponent: { userId: bbUser.userId, username: bbUser.username }, mode,
+    matchId, opponent: { userId: bbUser.userId, username: bbUser.username, elo: bbUser.elo }, mode,
   });
   io.to(`user:${bbUser.userId}`).emit("match.found", {
-    matchId, opponent: { userId: sbUser.userId, username: sbUser.username }, mode,
+    matchId, opponent: { userId: sbUser.userId, username: sbUser.username, elo: sbUser.elo }, mode,
   });
 
   console.log(

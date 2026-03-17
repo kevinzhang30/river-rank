@@ -1236,12 +1236,12 @@ function ChooseUsernameView({
     setSubmitting(true);
     setSubmitError(null);
 
-    const elo = level === "beginner" ? 600 : 1200;
-
     const { error } = await supabase
-      .from("profiles")
-      .update({ username: trimmed, elo, country })
-      .eq("id", userId);
+      .rpc("setup_profile", {
+        p_username: trimmed,
+        p_level: level,
+        p_country: country,
+      });
 
     setSubmitting(false);
 

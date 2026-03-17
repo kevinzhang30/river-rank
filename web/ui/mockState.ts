@@ -20,6 +20,7 @@ export const mockState: PublicGameState = {
       isDealer: false,
       isToAct: false,
       folded: false,
+      elo: 1350,
     },
     {
       userId: "hero-1",
@@ -29,6 +30,7 @@ export const mockState: PublicGameState = {
       isDealer: true,
       isToAct: true,
       folded: false,
+      elo: 1200,
     },
   ],
   log: [
