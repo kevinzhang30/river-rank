@@ -226,6 +226,9 @@ function GameView() {
   }
 
   function backToLobby() {
+    if (status === "in queue…") {
+      socketRef.current?.emit("queue.leave");
+    }
     socketRef.current?.disconnect();
     if (isTournamentMatch) {
       router.push(`/tournament/${tournamentId}`);
@@ -510,12 +513,9 @@ function GameView() {
             </span>
             {status === "in queue…" && queueStartMs && (() => {
               const elapsed  = Math.floor((Date.now() - queueStartMs) / 1000);
-              const remaining = Math.max(0, 20 - elapsed);
               return (
                 <span style={{ color: "var(--text3)", fontSize: 11, fontFamily: "monospace" }}>
-                  {remaining > 0
-                    ? `Bot joins in ${remaining}s`
-                    : "Joining with bot…"}
+                  Searching for opponent… {elapsed}s
                 </span>
               );
             })()}
