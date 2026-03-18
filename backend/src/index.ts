@@ -16,7 +16,14 @@ import { newDeck, shuffle } from "./engine/deck";
 import { getLegalActions, validateAction, ActionError } from "./engine/betting";
 import { showdownWinner, bestHand } from "./engine/handEvaluator";
 import { decideBotAction } from "./bot/strategy";
-import type { BotDifficulty } from "./bot/strategy";
+import type { BotGameContext } from "./bot/strategy";
+
+// Legacy type — kept for backwards compatibility during transition
+type BotDifficulty = "easy" | "medium" | "hard";
+import {
+  isBot, getBotProfile, findBotByElo, updateBotElo,
+  markBotUsed, recordBotOpponent, loadBotRegistry,
+} from "./bot/registry";
 import { prisma } from "./db";
 import { supabaseAdmin } from "./db/supabaseAdmin";
 
@@ -31,8 +38,13 @@ interface User {
 
 // ── Bot constants ─────────────────────────────────────────────────────────────
 
+// Legacy fallback (kept as safety net — remove after bot ladder stabilizes)
 const BOT_ID               = "00000000-0000-0000-0000-000000000000";
 const BOT_QUEUE_TIMEOUT_MS = 20_000;
+
+// Organic bot timing: random delay before a bot "joins the queue"
+const BOT_JOIN_MIN_MS = 7_000;
+const BOT_JOIN_MAX_MS = 12_000;
 
 // ── Turn timer ────────────────────────────────────────────────────────────────
 
@@ -159,22 +171,36 @@ app.get("/leaderboard", async (_req, res) => {
 
 // ── Bot helpers ───────────────────────────────────────────────────────────────
 
+// Legacy fallback safety net. Remove after bot ladder stabilizes.
 function makeBotUser(): User {
   return { userId: BOT_ID, username: "RiverBot", socketId: "", elo: 1200 };
-}
-
-function getBotDifficulty(mode: Mode, elo: number): BotDifficulty {
-  if (mode === "unranked") return "easy";
-  // Bullet uses ELO-based scaling like ranked
-  if (elo < 1100) return "easy";
-  if (elo <= 1300) return "medium";
-  return "hard";
 }
 
 function clearQueueTimer(userId: string): void {
   const t = queueTimers.get(userId);
   if (t) { clearTimeout(t); queueTimers.delete(userId); }
+  // Also clear organic bot timer if one exists
+  const organicKey = `organic:${userId}`;
+  const ot = botTimers.get(organicKey);
+  if (ot) { clearTimeout(ot); botTimers.delete(organicKey); }
   queuedPlayers.delete(userId);
+}
+
+function removeUserFromQueues(userId: string, socketId?: string): Mode[] {
+  clearQueueTimer(userId);
+
+  const removedFrom: Mode[] = [];
+  for (const mode of ["ranked", "unranked", "bullet"] as Mode[]) {
+    const idx = queues[mode].findIndex((queuedUser) => (
+      queuedUser.userId === userId && (!socketId || queuedUser.socketId === socketId)
+    ));
+    if (idx === -1) continue;
+
+    queues[mode].splice(idx, 1);
+    removedFrom.push(mode);
+  }
+
+  return removedFrom;
 }
 
 // ── State serialization ───────────────────────────────────────────────────────
@@ -269,7 +295,7 @@ function emitGameState(state: InternalGameState): void {
   const pub = toPublicState(state);
 
   for (const player of state.players) {
-    if (player.id === BOT_ID) continue; // bot has no socket
+    if (isBot(player.id)) continue; // bot has no socket
     const socketId = state.socketIds[player.id];
     const socket   = io.sockets.sockets.get(socketId);
     if (!socket) continue;
@@ -312,30 +338,48 @@ function emitGameState(state: InternalGameState): void {
   // Emit spectator state to spectate room
   emitSpectatorState(state);
 
-  // Schedule bot turn if it's the bot's turn to act
-  if (state.toActId === BOT_ID && state.street !== "SHOWDOWN" && !state.ended) {
+  // Schedule bot turn if it's a bot's turn to act
+  const botProfile = getBotProfile(state.toActId);
+  if (botProfile && state.street !== "SHOWDOWN" && !state.ended) {
     const existing = botTimers.get(state.matchId);
     if (existing) clearTimeout(existing);
 
+    const botId = state.toActId;
     const delay = 1000 + Math.random() * 1500; // 1000–2500 ms
     const timer = setTimeout(() => {
       botTimers.delete(state.matchId);
-      if (state.toActId !== BOT_ID || state.street === "SHOWDOWN" || state.ended) return;
+      if (state.toActId !== botId || state.street === "SHOWDOWN" || state.ended) return;
 
-      const legal      = getLegalActions(state, BOT_ID);
-      const holeCards  = state.holeCards[BOT_ID];
+      const legal = getLegalActions(state, botId);
+      const holeCards = state.holeCards[botId];
       if (!holeCards) return;
 
-      const difficulty = botDifficulties.get(state.matchId) ?? "easy";
-      const { action, amount } = decideBotAction(
-        holeCards, state.board, state.street,
-        legal, state.pot, state.bigBlind, difficulty,
-      );
+      const opponent = state.players.find((p) => p.id !== botId)!;
+      const hero = state.players.find((p) => p.id === botId)!;
+
+      // Determine if bot was last aggressor (simplified: check last log entry)
+      const lastAgg = state.log.length > 0 &&
+        state.log[state.log.length - 1].action === "raise" &&
+        state.log[state.log.length - 1].playerId === botId;
+
+      const ctx: BotGameContext = {
+        holeCards,
+        board: state.board,
+        street: state.street,
+        legal,
+        pot: state.pot,
+        bigBlind: state.bigBlind,
+        heroStack: hero.stack,
+        villainStack: opponent.stack,
+        wasLastAggressor: lastAgg,
+      };
+
+      const { action, amount } = decideBotAction(ctx, botProfile);
 
       console.log(
-        `[bot] RiverBot acting — action=${action}${amount !== undefined ? ` amount=${amount}` : ""}`,
+        `[bot] ${botProfile.username} acting — action=${action}${amount !== undefined ? ` amount=${amount}` : ""}`,
       );
-      applyAction(state, BOT_ID, action, amount);
+      applyAction(state, botId, action, amount);
     }, delay);
 
     botTimers.set(state.matchId, timer);
@@ -698,23 +742,10 @@ function forfeitMatch(
 
   const matchId    = state.matchId;
   const ranked     = state.mode === "ranked";
-  const isBotMatch = state.players.some((p) => p.id === BOT_ID);
+  const isBotMatch = state.players.some((p) => isBot(p.id));
 
   // Notify spectators
   io.to(`spectate:${matchId}`).emit("spectate.ended", { winnerId, winnerUsername });
-
-  if (isBotMatch) {
-    io.to(`match:${matchId}`).emit("match.ended", {
-      matchId,
-      winnerId,
-      winnerUsername,
-      ranked: false,
-      ratingDelta: null,
-      reason,
-    });
-    console.log(`[forfeit] bot match ended — reason=${reason} winner=${winnerUsername}`);
-    return;
-  }
 
   (async () => {
     let ratingDelta: Record<string, number> | null = null;
@@ -726,6 +757,16 @@ function forfeitMatch(
       }
       if (ranked) {
         ratingDelta = { [state.players[0].id]: result.p1Delta, [state.players[1].id]: result.p2Delta };
+      }
+      // Update bot Elo in registry if bot was involved
+      if (isBotMatch) {
+        for (const p of state.players) {
+          if (isBot(p.id)) {
+            const newElo = p.id === state.players[0].id
+              ? result.p1EloAfter : result.p2EloAfter;
+            updateBotElo(p.id, newElo);
+          }
+        }
       }
     } catch (err) {
       console.error("[db] recordMatchEnd (forfeit) failed:", err);
@@ -816,39 +857,43 @@ function endHand(state: InternalGameState, winnerIndex: 0 | 1, reason: "FOLD" | 
     const ranked         = state.mode === "ranked";
     const p1             = state.players[0];
     const p2             = state.players[1];
-    const isBotMatch     = p1.id === BOT_ID || p2.id === BOT_ID;
+    const isBotMatch     = isBot(p1.id) || isBot(p2.id) || p1.id === BOT_ID || p2.id === BOT_ID;
 
     // Async: call RPC (DB guard), then emit match.ended with authoritative deltas.
     (async () => {
       let ratingDelta: Record<string, number> | null = null;
       try {
-        if (!isBotMatch) {
-          const result = await recordMatchEnd(state, winnerId);
+        const result = await recordMatchEnd(state, winnerId);
 
-          if (result === null) {
-            // DB guard fired — already recorded, skip emit to avoid duplicate.
-            console.warn(`[match.ended] duplicate RPC call for ${matchId.slice(0, 8)}, skipping`);
-            return;
-          }
+        if (result === null) {
+          console.warn(`[match.ended] duplicate RPC call for ${matchId.slice(0, 8)}, skipping`);
+          return;
+        }
 
-          if (ranked) {
-            ratingDelta = { [p1.id]: result.p1Delta, [p2.id]: result.p2Delta };
-            console.log(
-              `[match.ended] winnerId=${winnerId.slice(0, 8)} ranked=true` +
-              ` ${p1.username}: ${result.p1EloBefore}→${result.p1EloAfter}` +
-              ` (${result.p1Delta >= 0 ? "+" : ""}${result.p1Delta})` +
-              ` ${p2.username}: ${result.p2EloBefore}→${result.p2EloAfter}` +
-              ` (${result.p2Delta >= 0 ? "+" : ""}${result.p2Delta})`,
-            );
-          } else {
-            console.log(
-              `[match.ended] winnerId=${winnerId.slice(0, 8)} ranked=false winner=${winnerUsername}`,
-            );
-          }
+        if (ranked) {
+          ratingDelta = { [p1.id]: result.p1Delta, [p2.id]: result.p2Delta };
+          console.log(
+            `[match.ended] winnerId=${winnerId.slice(0, 8)} ranked=true` +
+            ` ${p1.username}: ${result.p1EloBefore}→${result.p1EloAfter}` +
+            ` (${result.p1Delta >= 0 ? "+" : ""}${result.p1Delta})` +
+            ` ${p2.username}: ${result.p2EloBefore}→${result.p2EloAfter}` +
+            ` (${result.p2Delta >= 0 ? "+" : ""}${result.p2Delta})`,
+          );
         } else {
           console.log(
-            `[match.ended] bot match winnerId=${winnerId.slice(0, 8)} winner=${winnerUsername}`,
+            `[match.ended] winnerId=${winnerId.slice(0, 8)} ranked=false winner=${winnerUsername}`,
           );
+        }
+
+        // Update bot Elo in registry cache
+        if (isBotMatch) {
+          for (const p of [p1, p2]) {
+            if (isBot(p.id)) {
+              const newElo = p.id === state.players[0].id
+                ? result.p1EloAfter : result.p2EloAfter;
+              updateBotElo(p.id, newElo);
+            }
+          }
         }
       } catch (err) {
         console.error("[db] recordMatchEnd failed:", err);
@@ -996,8 +1041,8 @@ async function createMatch(
   }
 
   matches.set(matchId, state);
-  if (p1.userId !== BOT_ID) activeMatches.set(p1.userId, matchId);
-  if (p2.userId !== BOT_ID) activeMatches.set(p2.userId, matchId);
+  if (!isBot(p1.userId)) activeMatches.set(p1.userId, matchId);
+  if (!isBot(p2.userId)) activeMatches.set(p2.userId, matchId);
   if (botDifficulty) botDifficulties.set(matchId, botDifficulty);
 
   const room = `match:${matchId}`;
@@ -1258,7 +1303,7 @@ setInterval(() => {
     // Skip matches with no active turn, at showdown, or with timer cleared/guarded
     if (
       !state.toActId          ||
-      state.toActId === BOT_ID   || // bot acts via its own timer
+      isBot(state.toActId)      || // bot acts via its own timer
       state.street === "SHOWDOWN" ||
       state.turnDeadlineMs === 0      ||
       state.turnDeadlineMs === Infinity ||
@@ -1277,7 +1322,7 @@ setInterval(() => {
 
     // Track consecutive timeouts for non-bot players
     state.consecutiveTimeouts[playerId] = (state.consecutiveTimeouts[playerId] ?? 0) + 1;
-    const isBotMatch = state.players.some((p) => p.id === BOT_ID);
+    const isBotMatch = state.players.some((p) => isBot(p.id));
     if (state.consecutiveTimeouts[playerId] >= 3 && !isBotMatch) {
       console.log(`[timeout] player=${playerName} hit 3 consecutive timeouts — auto-forfeit`);
       forfeitMatch(state, playerId, "TIMEOUT");
@@ -1322,11 +1367,18 @@ io.on("connection", (socket: Socket) => {
           throw e;
         }
       }
+      // Fetch authoritative elo from Supabase profiles (source of truth)
+      const { data: profile } = await supabaseAdmin
+        .from("profiles")
+        .select("elo")
+        .eq("id", verifiedId)
+        .single();
+
       const user: User = {
         userId:   verifiedId,
-        username: dbUser.username,
+        username: dbUser.username ?? trimmed,
         socketId: socket.id,
-        elo:      dbUser.elo,
+        elo:      profile?.elo ?? dbUser.elo,
       };
       // ── Multi-tab presence: allow multiple sockets per user ──
       const existingSocketId = userSockets.get(verifiedId);
@@ -1385,6 +1437,7 @@ io.on("connection", (socket: Socket) => {
     if (activeMatches.has(user.userId)) return; // prevent re-queuing during active match
     if (playerTournament.has(user.userId)) return; // prevent queuing while in tournament
     if (queuedPlayers.has(user.userId)) return;    // atomic guard: prevent race from multiple sockets
+    clearQueueTimer(user.userId);                  // reset any stale fallback timer before re-queueing
     const queueMode: Mode = mode === "unranked" ? "unranked" : mode === "bullet" ? "bullet" : "ranked";
     const q = queues[queueMode];
     if (q.some((u) => u.userId === user.userId)) return;
@@ -1399,34 +1452,58 @@ io.on("connection", (socket: Socket) => {
         console.error("[match] createMatch error:", err),
       );
     } else {
-      // No opponent yet — pair with bot after 20 seconds
-      const timer = setTimeout(() => {
+      // No opponent yet — organic bot timer (7-12s), with legacy 20s fallback
+      const organicDelay = BOT_JOIN_MIN_MS + Math.random() * (BOT_JOIN_MAX_MS - BOT_JOIN_MIN_MS);
+      const organicTimer = setTimeout(() => {
+        const idx = q.findIndex((u) => u.userId === user.userId);
+        if (idx === -1) return; // already matched or left
+
+        const bot = findBotByElo(user.elo, user.userId, queueMode);
+        if (!bot) {
+          console.log(`[queue:${queueMode}] ${user.username} — no bot found, waiting for legacy fallback`);
+          return; // let legacy 20s timer handle it
+        }
+
+        // Found a bot — remove from queue and create match
+        q.splice(idx, 1);
+        clearQueueTimer(user.userId);
+        const botUser: User = { userId: bot.id, username: bot.username, socketId: "", elo: bot.elo };
+        markBotUsed(bot.id);
+        recordBotOpponent(user.userId, bot.id);
+        console.log(`[queue:${queueMode}] ${user.username} matched with bot ${bot.username} (elo=${bot.elo})`);
+        createMatch(user, botUser, queueMode).catch((err) =>
+          console.error("[match] bot createMatch error:", err),
+        );
+      }, organicDelay);
+
+      // Legacy fallback safety net. Remove after bot ladder stabilizes.
+      const legacyTimer = setTimeout(() => {
         queueTimers.delete(user.userId);
         queuedPlayers.delete(user.userId);
         const idx = q.findIndex((u) => u.userId === user.userId);
         if (idx === -1) return; // already matched or left
         q.splice(idx, 1);
-        const difficulty = getBotDifficulty(queueMode, user.elo);
-        console.log(`[queue:${queueMode}] ${user.username} timed out — matching with bot (${difficulty})`);
+        console.log(`[queue:${queueMode}] ${user.username} — legacy 20s fallback triggered`);
         const botMode = queueMode === "bullet" ? "bullet" : "unranked";
-        createMatch(user, makeBotUser(), botMode, difficulty).catch((err) =>
-          console.error("[match] bot createMatch error:", err),
+        createMatch(user, makeBotUser(), botMode).catch((err) =>
+          console.error("[match] legacy bot createMatch error:", err),
         );
       }, BOT_QUEUE_TIMEOUT_MS);
-      queueTimers.set(user.userId, timer);
+
+      // Store legacy timer so clearQueueTimer can cancel it
+      queueTimers.set(user.userId, legacyTimer);
+      // Also track organic timer so we can clear it
+      // We piggyback on botTimers since it's not match-specific here — use a unique key
+      const organicKey = `organic:${user.userId}`;
+      botTimers.set(organicKey, organicTimer);
     }
   });
 
   socket.on("queue.leave", () => {
     const user = users.get(socket.id);
     if (!user) return;
-    clearQueueTimer(user.userId);
-    for (const m of ["ranked", "unranked", "bullet"] as Mode[]) {
-      const idx = queues[m].findIndex((u) => u.userId === user.userId);
-      if (idx !== -1) {
-        queues[m].splice(idx, 1);
-        console.log(`[queue:${m}] ${user.username} left — size: ${queues[m].length}`);
-      }
+    for (const mode of removeUserFromQueues(user.userId)) {
+      console.log(`[queue:${mode}] ${user.username} left — size: ${queues[mode].length}`);
     }
   });
 
@@ -1496,9 +1573,9 @@ io.on("connection", (socket: Socket) => {
 
     state.readyForNextHand[user.userId] = true;
 
-    const isBotMatch = state.players.some((p) => p.id === BOT_ID);
+    const isBotMatch = state.players.some((p) => isBot(p.id));
     const allReady = isBotMatch
-      ? state.players.some((p) => p.id !== BOT_ID && state.readyForNextHand[p.id])
+      ? state.players.some((p) => !isBot(p.id) && state.readyForNextHand[p.id])
       : state.players.every((p) => state.readyForNextHand[p.id]);
 
     if (allReady) {
@@ -2154,11 +2231,7 @@ io.on("connection", (socket: Socket) => {
 
       // Only clean up queue/challenges/match when ALL sockets are gone
       if (!stillOnline) {
-        clearQueueTimer(user.userId);
-        for (const m of ["ranked", "unranked", "bullet"] as Mode[]) {
-          const idx = queues[m].findIndex((u) => u.userId === user.userId);
-          if (idx !== -1) queues[m].splice(idx, 1);
-        }
+        removeUserFromQueues(user.userId);
 
         // Clean up pending challenges where this user is the challenger
         for (const [cid, challenge] of pendingChallenges) {
@@ -2183,7 +2256,7 @@ io.on("connection", (socket: Socket) => {
         if (matchId) {
           const state = matches.get(matchId);
           if (state && !state.ended) {
-            const isBotMatch = state.players.some((p) => p.id === BOT_ID);
+            const isBotMatch = state.players.some((p) => isBot(p.id));
             if (isBotMatch) {
               forfeitMatch(state, user.userId, "DISCONNECT");
             } else {
@@ -2205,6 +2278,10 @@ io.on("connection", (socket: Socket) => {
         }
 
         queuedPlayers.delete(user.userId);
+      } else {
+        for (const mode of removeUserFromQueues(user.userId, socket.id)) {
+          console.log(`[queue:${mode}] ${user.username} disconnected while queued — size: ${queues[mode].length}`);
+        }
       }
 
       users.delete(socket.id);
@@ -2219,4 +2296,11 @@ io.on("connection", (socket: Socket) => {
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 
-httpServer.listen(4000, () => console.log("Backend running on http://localhost:4000"));
+loadBotRegistry()
+  .then(() => {
+    httpServer.listen(4000, () => console.log("Backend running on http://localhost:4000"));
+  })
+  .catch((err) => {
+    console.error("[bot-registry] failed to load, starting without bots:", err);
+    httpServer.listen(4000, () => console.log("Backend running on http://localhost:4000 (no bot registry)"));
+  });
