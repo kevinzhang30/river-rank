@@ -18,6 +18,7 @@ const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4000";
 interface Profile {
   username: string | null;
   elo:      number;
+  peak_elo: number;
   wins:     number;
   losses:   number;
   country:  string | null;
@@ -123,6 +124,9 @@ function ProfileCard({ profile }: { profile: Profile }) {
             {" / "}
             <span style={{ color: "var(--danger)", fontWeight: 700 }}>{profile.losses}L</span>
           </span>
+        </div>
+        <div style={{ fontSize: 11, color: "var(--text3)" }}>
+          Peak: <span style={{ fontWeight: 700, color: "var(--text2)" }}>{profile.peak_elo.toLocaleString()}</span>
         </div>
         <div
           style={{
@@ -653,14 +657,17 @@ function LeaderboardCard({
   onScopeChange,
   userRank,
   userCountry,
+  totalPlayers,
 }: {
   entries:       LeaderboardEntry[];
   scope:         "global" | "national";
   onScopeChange: (scope: "global" | "national") => void;
   userRank:      { global: number | null; national: number | null };
   userCountry:   string | null | undefined;
+  totalPlayers:  { global: number | null; national: number | null };
 }) {
-  const rankValue = scope === "global" ? userRank.global : userRank.national;
+  const rankValue  = scope === "global" ? userRank.global : userRank.national;
+  const totalValue = scope === "global" ? totalPlayers.global : totalPlayers.national;
 
   return (
     <Card>
@@ -749,7 +756,7 @@ function LeaderboardCard({
             textAlign:     "center",
           }}
         >
-          You are ranked <span style={{ fontWeight: 700, color: "var(--text)" }}>#{rankValue}</span> {scope === "national" ? "nationally" : "globally"}
+          You are ranked <span style={{ fontWeight: 700, color: "var(--text)" }}>#{rankValue}</span>{totalValue !== null && <> out of {totalValue} players</>} {scope === "national" ? "nationally" : "globally"}
         </div>
       )}
     </Card>
@@ -1520,6 +1527,7 @@ function PageInner() {
   const [recentMatches, setRecentMatches] = useState<RecentMatch[]>([]);
   const [leaderboardScope, setLeaderboardScope] = useState<"global" | "national">("global");
   const [userRank, setUserRank] = useState<{ global: number | null; national: number | null }>({ global: null, national: null });
+  const [totalPlayers, setTotalPlayers] = useState<{ global: number | null; national: number | null }>({ global: null, national: null });
 
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef     = useRef<HTMLDivElement>(null);
@@ -1560,7 +1568,7 @@ function PageInner() {
 
     supabase
       .from("profiles")
-      .select("username, elo, wins, losses, country, friend_code")
+      .select("username, elo, peak_elo, wins, losses, country, friend_code")
       .eq("id", session.user.id)
       .maybeSingle()
       .then(async ({ data, error }) => {
@@ -1569,7 +1577,7 @@ function PageInner() {
         if (error && !data) {
           const retry = await supabase
             .from("profiles")
-            .select("username, elo, wins, losses, country")
+            .select("username, elo, peak_elo, wins, losses, country")
             .eq("id", session.user.id)
             .maybeSingle();
           profileData = retry.data as typeof data;
@@ -1580,7 +1588,7 @@ function PageInner() {
           await supabase
             .from("profiles")
             .upsert({ id: session.user.id, username: null }, { onConflict: "id" });
-          setProfile({ username: null, elo: 1200, wins: 0, losses: 0, country: null });
+          setProfile({ username: null, elo: 1200, peak_elo: 1200, wins: 0, losses: 0, country: null });
         } else {
           setProfile(profileData as Profile);
           if ((profileData as any).friend_code) setFriendCode((profileData as any).friend_code as string);
@@ -1826,7 +1834,7 @@ function PageInner() {
       });
   }, [session, leaderboardScope, profile?.country]);
 
-  // User rank
+  // User rank + total player counts
   useEffect(() => {
     if (!session || !profile?.elo) return;
     // Global rank
@@ -1838,7 +1846,15 @@ function PageInner() {
       .then(({ count }) => {
         setUserRank((prev) => ({ ...prev, global: count !== null ? count + 1 : null }));
       });
-    // National rank
+    // Global total
+    supabase
+      .from("profiles")
+      .select("id", { count: "exact", head: true })
+      .not("username", "is", null)
+      .then(({ count }) => {
+        setTotalPlayers((prev) => ({ ...prev, global: count ?? null }));
+      });
+    // National rank + total
     if (profile.country) {
       supabase
         .from("profiles")
@@ -1849,8 +1865,17 @@ function PageInner() {
         .then(({ count }) => {
           setUserRank((prev) => ({ ...prev, national: count !== null ? count + 1 : null }));
         });
+      supabase
+        .from("profiles")
+        .select("id", { count: "exact", head: true })
+        .not("username", "is", null)
+        .eq("country", profile.country)
+        .then(({ count }) => {
+          setTotalPlayers((prev) => ({ ...prev, national: count ?? null }));
+        });
     } else {
       setUserRank((prev) => ({ ...prev, national: null }));
+      setTotalPlayers((prev) => ({ ...prev, national: null }));
     }
   }, [session, profile?.elo, profile?.country]);
 
@@ -2066,6 +2091,7 @@ function PageInner() {
               onScopeChange={setLeaderboardScope}
               userRank={userRank}
               userCountry={profile?.country}
+              totalPlayers={totalPlayers}
             />
             <FriendsCard
               friends={friends}
