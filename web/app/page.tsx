@@ -1532,6 +1532,7 @@ function PageInner() {
   const [challengeWaiting, setChallengeWaiting] = useState<{ friendId: string; challengeId: string } | null>(null);
   const [friendToast, setFriendToast]           = useState<string | null>(null);
   const [onlineFriends, setOnlineFriends]       = useState<Set<string>>(new Set());
+  const [dashboardSocketConnected, setDashboardSocketConnected] = useState(false);
   const dashboardSocketRef = useRef<Socket | null>(null);
 
   // Session
@@ -1692,7 +1693,12 @@ function PageInner() {
     dashboardSocketRef.current = socket;
 
     socket.on("connect", () => {
+      setDashboardSocketConnected(true);
       socket.emit("auth.guest", { username: profile.username }, () => {});
+    });
+
+    socket.on("disconnect", () => {
+      setDashboardSocketConnected(false);
     });
 
     socket.on("challenge.received", (data: IncomingChallenge) => {
@@ -1718,20 +1724,30 @@ function PageInner() {
     });
 
     return () => {
+      setDashboardSocketConnected(false);
       socket.disconnect();
       dashboardSocketRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.access_token, profile?.username]);
 
-  // Request online status for friends when friends list loads
-  useEffect(() => {
+  const requestFriendStatuses = useCallback(() => {
     const socket = dashboardSocketRef.current;
-    if (!socket?.connected || friends.length === 0) return;
-    socket.emit("friends.status", { friendIds: friends.map(f => f.id) }, (online: string[]) => {
+    if (!socket?.connected) return;
+    if (friends.length === 0) {
+      setOnlineFriends(new Set());
+      return;
+    }
+
+    socket.emit("friends.status", { friendIds: friends.map((f) => f.id) }, (online: string[]) => {
       setOnlineFriends(new Set(online));
     });
   }, [friends]);
+
+  // Request online status once the socket is connected and whenever the friend list changes.
+  useEffect(() => {
+    requestFriendStatuses();
+  }, [dashboardSocketConnected, requestFriendStatuses]);
 
   function handleChallenge(friendId: string, mode: Mode) {
     const socket = dashboardSocketRef.current;
