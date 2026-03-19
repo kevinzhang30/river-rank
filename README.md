@@ -6,6 +6,12 @@ RiverRank.io is a real-time multiplayer heads-up poker platform featuring ranked
 
 The application is designed as a production-style system demonstrating real-time communication, distributed state management, and secure backend validation.
 
+<!-- USER_COUNT_START -->
+**1,100** users | **280** matches completed
+
+*Last updated: 2026-03-19*
+<!-- USER_COUNT_END -->
+
 ---
 
 ## Description
@@ -45,14 +51,14 @@ The system is built with production principles in mind:
 - Elo rating system (K-factor based)
 
 ### Database & Authentication
-- Supabase Auth (email magic link)
+- Supabase Auth
 - PostgreSQL (Supabase)
 - Row-Level Security policies
 - RPC function for atomic match + rating updates
 
 ### Deployment
 - Frontend: Vercel
-- Backend: Fly.io / Render / Railway
+- Backend: Railway
 - Database & Auth: Supabase
 
 ---
@@ -79,5 +85,5 @@ Active development. Designed as a long-term platform project. Version 1 release 
 ## Stretch Goals
 
 - Mobile App support
-- User count
+- Increase User count
 - Paid cosmetics and battle pass subscription paywall for advanced features
