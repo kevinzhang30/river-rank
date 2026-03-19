@@ -60,6 +60,7 @@ export function adaptBackendState(
       isToAct: p.userId === heroUserId,
       folded: false,
       elo: 1000,                           // unknown — placeholder
+      country: null,                         // unknown — placeholder
     })
   );
 

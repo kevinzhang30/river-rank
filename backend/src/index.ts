@@ -34,6 +34,7 @@ interface User {
   username: string;
   socketId: string;
   elo:      number;
+  country:  string | null;
 }
 
 // ── Bot constants ─────────────────────────────────────────────────────────────
@@ -43,7 +44,7 @@ const BOT_ID               = "00000000-0000-0000-0000-000000000000";
 const BOT_QUEUE_TIMEOUT_MS = 20_000;
 
 // Organic bot timing: random delay before a bot "joins the queue"
-const BOT_JOIN_MIN_MS = 7_000;
+const BOT_JOIN_MIN_MS = 4_000;
 const BOT_JOIN_MAX_MS = 12_000;
 
 // ── Turn timer ────────────────────────────────────────────────────────────────
@@ -173,7 +174,7 @@ app.get("/leaderboard", async (_req, res) => {
 
 // Legacy fallback safety net. Remove after bot ladder stabilizes.
 function makeBotUser(): User {
-  return { userId: BOT_ID, username: "RiverBot", socketId: "", elo: 1200 };
+  return { userId: BOT_ID, username: "RiverBot", socketId: "", elo: 1200, country: null };
 }
 
 function clearQueueTimer(userId: string): void {
@@ -226,6 +227,7 @@ function toPublicState(state: InternalGameState) {
       isToAct:  p.id === state.toActId && !p.folded && state.street !== "SHOWDOWN",
       folded:   p.folded,
       elo:      state.playerElos[p.id] ?? 1000,
+      country:  state.playerCountries[p.id] ?? null,
     })),
     log:        state.log.map((e) => ({
       username: e.username,
@@ -1028,6 +1030,7 @@ async function createMatch(
     config,
     handStartStacks: {},
     playerElos:      { [p1.userId]: p1.elo, [p2.userId]: p2.elo },
+    playerCountries: { [p1.userId]: p1.country, [p2.userId]: p2.country },
     turnDurationMs:         turnDurationMs,
     turnDeadlineMs:         0, // set by startNewHand
     consecutiveTimeouts:    { [p1.userId]: 0, [p2.userId]: 0 },
@@ -1367,10 +1370,10 @@ io.on("connection", (socket: Socket) => {
           throw e;
         }
       }
-      // Fetch authoritative elo from Supabase profiles (source of truth)
+      // Fetch authoritative elo + country from Supabase profiles (source of truth)
       const { data: profile } = await supabaseAdmin
         .from("profiles")
-        .select("elo")
+        .select("elo, country")
         .eq("id", verifiedId)
         .single();
 
@@ -1379,6 +1382,7 @@ io.on("connection", (socket: Socket) => {
         username: dbUser.username ?? trimmed,
         socketId: socket.id,
         elo:      profile?.elo ?? dbUser.elo,
+        country:  profile?.country ?? null,
       };
       // ── Multi-tab presence: allow multiple sockets per user ──
       const existingSocketId = userSockets.get(verifiedId);
@@ -1445,13 +1449,19 @@ io.on("connection", (socket: Socket) => {
     q.push(user);
     console.log(`[queue:${queueMode}] ${user.username} joined — size: ${q.length}`);
     if (q.length >= 2) {
-      const [p1, p2] = q.splice(0, 2);
-      clearQueueTimer(p1.userId);
-      clearQueueTimer(p2.userId);
-      createMatch(p1, p2, queueMode).catch((err) =>
-        console.error("[match] createMatch error:", err),
-      );
-    } else {
+      const [p1, p2] = q.slice(0, 2);
+      if (Math.abs(p1.elo - p2.elo) <= 200) {
+        q.splice(0, 2);
+        clearQueueTimer(p1.userId);
+        clearQueueTimer(p2.userId);
+        createMatch(p1, p2, queueMode).catch((err) =>
+          console.error("[match] createMatch error:", err),
+        );
+        return;
+      }
+      // Elo gap too large — both stay in queue and wait for bot timers
+    }
+    if (!botTimers.has(`organic:${user.userId}`)) {
       // No opponent yet — organic bot timer (7-12s), with legacy 20s fallback
       const organicDelay = BOT_JOIN_MIN_MS + Math.random() * (BOT_JOIN_MAX_MS - BOT_JOIN_MIN_MS);
       const organicTimer = setTimeout(() => {
@@ -1467,7 +1477,7 @@ io.on("connection", (socket: Socket) => {
         // Found a bot — remove from queue and create match
         q.splice(idx, 1);
         clearQueueTimer(user.userId);
-        const botUser: User = { userId: bot.id, username: bot.username, socketId: "", elo: bot.elo };
+        const botUser: User = { userId: bot.id, username: bot.username, socketId: "", elo: bot.elo, country: bot.country ?? null };
         markBotUsed(bot.id);
         recordBotOpponent(user.userId, bot.id);
         console.log(`[queue:${queueMode}] ${user.username} matched with bot ${bot.username} (elo=${bot.elo})`);
