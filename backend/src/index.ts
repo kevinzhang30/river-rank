@@ -2243,6 +2243,15 @@ io.on("connection", (socket: Socket) => {
       if (!stillOnline) {
         removeUserFromQueues(user.userId);
 
+        // Persist last_online timestamp
+        supabaseAdmin
+          .from("profiles")
+          .update({ last_online: new Date().toISOString() })
+          .eq("id", user.userId)
+          .then(({ error }) => {
+            if (error) console.error("[presence] last_online update error:", error.message);
+          });
+
         // Clean up pending challenges where this user is the challenger
         for (const [cid, challenge] of pendingChallenges) {
           if (challenge.fromUser.userId === user.userId) {

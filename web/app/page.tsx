@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { Session } from "@supabase/supabase-js";
 import { io, Socket } from "socket.io-client";
@@ -34,12 +34,15 @@ interface RecentMatch {
 }
 
 interface Friend {
-  id:       string;
-  username: string;
-  country:  string | null;
-  elo:      number;
-  wins:     number;
-  losses:   number;
+  id:          string;
+  username:    string;
+  country:     string | null;
+  elo:         number;
+  peak_elo:    number;
+  wins:        number;
+  losses:      number;
+  last_online: string | null;
+  created_at:  string;
 }
 
 interface IncomingChallenge {
@@ -58,7 +61,11 @@ function timeAgo(isoDate: string): string {
   if (m < 60)  return `${m}m ago`;
   const h = Math.floor(m / 60);
   if (h < 24)  return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7)   return `${d}d ago`;
+  if (d < 30)  return `${Math.floor(d / 7)}w ago`;
+  if (d < 365) return `${Math.floor(d / 30)}mo ago`;
+  return `${Math.floor(d / 365)}y ago`;
 }
 
 // ── Card shell ────────────────────────────────────────────────────────────────
@@ -872,6 +879,9 @@ function FriendsCard({
   onCancelChallenge,
   challengeWaiting,
   onlineFriends,
+  friendsSort,
+  onSortChange,
+  h2hRecords,
 }: {
   friends:            Friend[];
   friendCode:         string | null;
@@ -882,9 +892,13 @@ function FriendsCard({
   onCancelChallenge:  () => void;
   challengeWaiting:   { friendId: string; challengeId: string } | null;
   onlineFriends:      Set<string>;
+  friendsSort:        "online" | "elo" | "alpha";
+  onSortChange:       (sort: "online" | "elo" | "alpha") => void;
+  h2hRecords:         Map<string, { wins: number; losses: number }>;
 }) {
-  const [showLink, setShowLink] = useState(false);
-  const [copied, setCopied]     = useState(false);
+  const [showLink, setShowLink]             = useState(false);
+  const [copied, setCopied]                 = useState(false);
+  const [expandedFriendId, setExpandedFriendId] = useState<string | null>(null);
 
   const link = friendCode ? `riverrank.io/?friend=${friendCode}` : "";
 
@@ -1006,6 +1020,31 @@ function FriendsCard({
         </div>
       )}
 
+      {/* Sort buttons */}
+      {friends.length > 1 && (
+        <div style={{ display: "flex", gap: 4, marginBottom: "0.5rem" }}>
+          {(["online", "elo", "alpha"] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => onSortChange(s)}
+              style={{
+                background:    friendsSort === s ? "var(--primaryBtn)" : "transparent",
+                color:         friendsSort === s ? "var(--primaryBtnText)" : "var(--text3)",
+                border:        friendsSort === s ? "none" : "1px solid var(--border)",
+                borderRadius:  4,
+                padding:       "0.2rem 0.45rem",
+                fontSize:      10,
+                fontFamily:    "monospace",
+                fontWeight:    700,
+                cursor:        "pointer",
+              }}
+            >
+              {s === "online" ? "Online" : s === "elo" ? "Elo" : "A-Z"}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Friends list */}
       {friends.length === 0 ? (
         <div style={{ color: "var(--text3)", fontSize: 12, textAlign: "center", padding: "1rem 0" }}>
@@ -1016,96 +1055,135 @@ function FriendsCard({
           {friends.map((f) => {
             const isWaiting = challengeWaiting?.friendId === f.id;
             const flag = f.country && COUNTRY_MAP[f.country] ? COUNTRY_MAP[f.country].flag + " " : "";
+            const isOnline = onlineFriends.has(f.id);
+            const h2h = h2hRecords.get(f.id);
+            const isExpanded = expandedFriendId === f.id;
 
             return (
-              <div
-                key={f.id}
-                style={{
-                  display:      "flex",
-                  alignItems:   "center",
-                  gap:          8,
-                  padding:      "0.5rem 0.6rem",
-                  background:   "var(--surface2)",
-                  borderRadius: 4,
-                  border:       "1px solid var(--border)",
-                }}
-              >
-                {/* Online indicator */}
-                <span style={{
-                  width: 8, height: 8, borderRadius: "50%",
-                  background: onlineFriends.has(f.id) ? "#22C55E" : "var(--border)",
-                  flexShrink: 0,
-                }} />
-                {/* Name */}
-                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {flag}{f.username}
-                </span>
-                {/* Elo */}
-                <span style={{ fontSize: 11, fontWeight: 700, color: "#F59E0B", minWidth: 32, textAlign: "right" }}>
-                  {f.elo}
-                </span>
-                {/* W-L */}
-                <span style={{ fontSize: 10, color: "var(--text3)", minWidth: 36, textAlign: "right" }}>
-                  {f.wins}-{f.losses}
-                </span>
-                {/* Challenge buttons */}
-                {isWaiting ? (
-                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                    <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600, whiteSpace: "nowrap" }}>Waiting...</span>
-                    <button
-                      onClick={onCancelChallenge}
-                      style={{
-                        background:   "transparent",
-                        color:        "var(--text3)",
-                        border:       "1px solid var(--border)",
-                        borderRadius: 4,
-                        padding:      "0.2rem 0.45rem",
-                        fontSize:     10,
-                        fontFamily:   "monospace",
-                        fontWeight:   700,
-                        cursor:       "pointer",
-                        whiteSpace:   "nowrap",
-                      }}
-                    >
-                      Cancel
-                    </button>
+              <div key={f.id}>
+                <div
+                  onClick={() => setExpandedFriendId(isExpanded ? null : f.id)}
+                  style={{
+                    display:      "flex",
+                    alignItems:   "center",
+                    gap:          8,
+                    padding:      "0.5rem 0.6rem",
+                    background:   "var(--surface2)",
+                    borderRadius: isExpanded ? "4px 4px 0 0" : 4,
+                    border:       "1px solid var(--border)",
+                    cursor:       "pointer",
+                  }}
+                >
+                  {/* Online indicator */}
+                  <span style={{
+                    width: 8, height: 8, borderRadius: "50%",
+                    background: isOnline ? "#22C55E" : "var(--border)",
+                    flexShrink: 0,
+                  }} />
+                  {/* Name + last seen */}
+                  <div style={{ flex: 1, overflow: "hidden", minWidth: 0 }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>
+                      {flag}{f.username}
+                    </span>
+                    {!isOnline && (
+                      <span style={{ fontSize: 9, color: "var(--text3)" }}>
+                        {f.last_online ? timeAgo(f.last_online) : "Offline"}
+                      </span>
+                    )}
                   </div>
-                ) : (
-                  <div style={{ display: "flex", gap: 4 }}>
-                    <button
-                      onClick={() => onChallenge(f.id, "ranked")}
-                      style={{
-                        background:   "var(--primaryBtn)",
-                        color:        "var(--primaryBtnText)",
-                        border:       "none",
-                        borderRadius: 4,
-                        padding:      "0.2rem 0.45rem",
-                        fontSize:     10,
-                        fontFamily:   "monospace",
-                        fontWeight:   700,
-                        cursor:       "pointer",
-                        whiteSpace:   "nowrap",
-                      }}
-                    >
-                      Ranked
-                    </button>
-                    <button
-                      onClick={() => onChallenge(f.id, "unranked")}
-                      style={{
-                        background:   "transparent",
-                        color:        "var(--primaryBtn)",
-                        border:       "1px solid var(--primaryBtn)",
-                        borderRadius: 4,
-                        padding:      "0.2rem 0.45rem",
-                        fontSize:     10,
-                        fontFamily:   "monospace",
-                        fontWeight:   700,
-                        cursor:       "pointer",
-                        whiteSpace:   "nowrap",
-                      }}
-                    >
-                      Casual
-                    </button>
+                  {/* Elo */}
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#F59E0B", minWidth: 32, textAlign: "right" }}>
+                    {f.elo}
+                  </span>
+                  {/* Challenge buttons */}
+                  <div onClick={(e) => e.stopPropagation()}>
+                    {isWaiting ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600, whiteSpace: "nowrap" }}>Waiting...</span>
+                        <button
+                          onClick={onCancelChallenge}
+                          style={{
+                            background:   "transparent",
+                            color:        "var(--text3)",
+                            border:       "1px solid var(--border)",
+                            borderRadius: 4,
+                            padding:      "0.2rem 0.45rem",
+                            fontSize:     10,
+                            fontFamily:   "monospace",
+                            fontWeight:   700,
+                            cursor:       "pointer",
+                            whiteSpace:   "nowrap",
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", gap: 4 }}>
+                        <button
+                          onClick={() => onChallenge(f.id, "ranked")}
+                          style={{
+                            background:   "var(--primaryBtn)",
+                            color:        "var(--primaryBtnText)",
+                            border:       "none",
+                            borderRadius: 4,
+                            padding:      "0.2rem 0.45rem",
+                            fontSize:     10,
+                            fontFamily:   "monospace",
+                            fontWeight:   700,
+                            cursor:       "pointer",
+                            whiteSpace:   "nowrap",
+                          }}
+                        >
+                          Ranked
+                        </button>
+                        <button
+                          onClick={() => onChallenge(f.id, "unranked")}
+                          style={{
+                            background:   "transparent",
+                            color:        "var(--primaryBtn)",
+                            border:       "1px solid var(--primaryBtn)",
+                            borderRadius: 4,
+                            padding:      "0.2rem 0.45rem",
+                            fontSize:     10,
+                            fontFamily:   "monospace",
+                            fontWeight:   700,
+                            cursor:       "pointer",
+                            whiteSpace:   "nowrap",
+                          }}
+                        >
+                          Casual
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Expanded profile tooltip */}
+                {isExpanded && (
+                  <div
+                    style={{
+                      padding:      "0.5rem 0.6rem",
+                      background:   "var(--surface2)",
+                      borderRadius: "0 0 4px 4px",
+                      borderLeft:   "1px solid var(--border)",
+                      borderRight:  "1px solid var(--border)",
+                      borderBottom: "1px solid var(--border)",
+                      display:      "flex",
+                      flexWrap:     "wrap",
+                      gap:          "0.3rem 1rem",
+                      fontSize:     10,
+                      color:        "var(--text3)",
+                    }}
+                  >
+                    <span>Elo <strong style={{ color: "#F59E0B" }}>{f.elo}</strong></span>
+                    <span>Peak <strong style={{ color: "#F59E0B" }}>{f.peak_elo}</strong></span>
+                    <span>W-L <strong style={{ color: "var(--text2)" }}>{f.wins}-{f.losses}</strong>{" "}
+                      ({f.wins + f.losses > 0 ? ((f.wins / (f.wins + f.losses)) * 100).toFixed(0) : 0}%)
+                    </span>
+                    {h2h && <span>H2H <strong style={{ color: "var(--text2)" }}>{h2h.wins}-{h2h.losses}</strong></span>}
+                    <span>{isOnline ? "Online now" : f.last_online ? `Last seen ${timeAgo(f.last_online)}` : "Offline"}</span>
+                    {f.created_at && <span>Member since {new Date(f.created_at).toLocaleDateString("en-US", { month: "short", year: "numeric" })}</span>}
                   </div>
                 )}
               </div>
@@ -1540,8 +1618,31 @@ function PageInner() {
   const [challengeWaiting, setChallengeWaiting] = useState<{ friendId: string; challengeId: string } | null>(null);
   const [friendToast, setFriendToast]           = useState<string | null>(null);
   const [onlineFriends, setOnlineFriends]       = useState<Set<string>>(new Set());
+  const [h2hRecords, setH2hRecords]             = useState<Map<string, { wins: number; losses: number }>>(new Map());
+  const [friendsSort, setFriendsSort]           = useState<"online" | "elo" | "alpha">("online");
   const [dashboardSocketConnected, setDashboardSocketConnected] = useState(false);
   const dashboardSocketRef = useRef<Socket | null>(null);
+
+  const sortedFriends = useMemo(() => {
+    const sorted = [...friends];
+    switch (friendsSort) {
+      case "online":
+        sorted.sort((a, b) => {
+          const aOn = onlineFriends.has(a.id) ? 0 : 1;
+          const bOn = onlineFriends.has(b.id) ? 0 : 1;
+          if (aOn !== bOn) return aOn - bOn;
+          return a.username.localeCompare(b.username);
+        });
+        break;
+      case "elo":
+        sorted.sort((a, b) => b.elo - a.elo);
+        break;
+      case "alpha":
+        sorted.sort((a, b) => a.username.localeCompare(b.username));
+        break;
+    }
+    return sorted;
+  }, [friends, friendsSort, onlineFriends]);
 
   // Session
   useEffect(() => {
@@ -1629,7 +1730,7 @@ function PageInner() {
   const fetchFriends = useCallback(async (userId: string) => {
     const { data } = await supabase
       .from("friendships")
-      .select("friend:profiles!friend_id(id, username, country, elo, wins, losses)")
+      .select("friend:profiles!friend_id(id, username, country, elo, peak_elo, wins, losses, last_online, created_at)")
       .eq("user_id", userId);
     if (data) {
       setFriends(
@@ -1638,10 +1739,23 @@ function PageInner() {
     }
   }, []);
 
+  // Fetch h2h records
+  const fetchH2h = useCallback(async (userId: string) => {
+    const { data } = await supabase.rpc("get_h2h_records", { p_user_id: userId });
+    if (data) {
+      const map = new Map<string, { wins: number; losses: number }>();
+      for (const row of data as { opponent_id: string; wins: number; losses: number }[]) {
+        map.set(row.opponent_id, { wins: row.wins, losses: row.losses });
+      }
+      setH2hRecords(map);
+    }
+  }, []);
+
   useEffect(() => {
     if (!session || !profile?.username) return;
     fetchFriends(session.user.id);
-  }, [session, profile?.username, fetchFriends]);
+    fetchH2h(session.user.id);
+  }, [session, profile?.username, fetchFriends, fetchH2h]);
 
   // Friend link handling
   useEffect(() => {
@@ -2094,7 +2208,7 @@ function PageInner() {
               totalPlayers={totalPlayers}
             />
             <FriendsCard
-              friends={friends}
+              friends={sortedFriends}
               friendCode={friendCode}
               onChallenge={handleChallenge}
               pendingChallenge={pendingChallenge}
@@ -2103,6 +2217,9 @@ function PageInner() {
               onCancelChallenge={handleCancelChallenge}
               challengeWaiting={challengeWaiting}
               onlineFriends={onlineFriends}
+              friendsSort={friendsSort}
+              onSortChange={setFriendsSort}
+              h2hRecords={h2hRecords}
             />
             <RecentMatchesCard matches={recentMatches} />
           </div>
