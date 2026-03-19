@@ -9,6 +9,7 @@ import { ThemeToggle } from "@/ui/ThemeToggle";
 import { DeckToggle } from "@/ui/DeckToggle";
 import { useIsMobile } from "@/lib/useIsMobile";
 import type { LeaderboardEntry, Mode } from "@/ui/types";
+import { COUNTRIES, COUNTRY_MAP } from "@/lib/countries";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4000";
 
@@ -1111,79 +1112,6 @@ function FriendsCard({
 
 // ── Choose username view ──────────────────────────────────────────────────────
 
-const COUNTRIES: { code: string; flag: string; name: string }[] = [
-  { code: "AF", flag: "🇦🇫", name: "Afghanistan" },
-  { code: "AL", flag: "🇦🇱", name: "Albania" },
-  { code: "DZ", flag: "🇩🇿", name: "Algeria" },
-  { code: "AR", flag: "🇦🇷", name: "Argentina" },
-  { code: "AU", flag: "🇦🇺", name: "Australia" },
-  { code: "AT", flag: "🇦🇹", name: "Austria" },
-  { code: "BD", flag: "🇧🇩", name: "Bangladesh" },
-  { code: "BE", flag: "🇧🇪", name: "Belgium" },
-  { code: "BR", flag: "🇧🇷", name: "Brazil" },
-  { code: "BG", flag: "🇧🇬", name: "Bulgaria" },
-  { code: "CA", flag: "🇨🇦", name: "Canada" },
-  { code: "CL", flag: "🇨🇱", name: "Chile" },
-  { code: "CN", flag: "🇨🇳", name: "China" },
-  { code: "CO", flag: "🇨🇴", name: "Colombia" },
-  { code: "HR", flag: "🇭🇷", name: "Croatia" },
-  { code: "CZ", flag: "🇨🇿", name: "Czechia" },
-  { code: "DK", flag: "🇩🇰", name: "Denmark" },
-  { code: "EG", flag: "🇪🇬", name: "Egypt" },
-  { code: "EE", flag: "🇪🇪", name: "Estonia" },
-  { code: "FI", flag: "🇫🇮", name: "Finland" },
-  { code: "FR", flag: "🇫🇷", name: "France" },
-  { code: "DE", flag: "🇩🇪", name: "Germany" },
-  { code: "GR", flag: "🇬🇷", name: "Greece" },
-  { code: "HK", flag: "🇭🇰", name: "Hong Kong" },
-  { code: "HU", flag: "🇭🇺", name: "Hungary" },
-  { code: "IS", flag: "🇮🇸", name: "Iceland" },
-  { code: "IN", flag: "🇮🇳", name: "India" },
-  { code: "ID", flag: "🇮🇩", name: "Indonesia" },
-  { code: "IR", flag: "🇮🇷", name: "Iran" },
-  { code: "IQ", flag: "🇮🇶", name: "Iraq" },
-  { code: "IE", flag: "🇮🇪", name: "Ireland" },
-  { code: "IL", flag: "🇮🇱", name: "Israel" },
-  { code: "IT", flag: "🇮🇹", name: "Italy" },
-  { code: "JP", flag: "🇯🇵", name: "Japan" },
-  { code: "KZ", flag: "🇰🇿", name: "Kazakhstan" },
-  { code: "KE", flag: "🇰🇪", name: "Kenya" },
-  { code: "KR", flag: "🇰🇷", name: "South Korea" },
-  { code: "LV", flag: "🇱🇻", name: "Latvia" },
-  { code: "LT", flag: "🇱🇹", name: "Lithuania" },
-  { code: "MY", flag: "🇲🇾", name: "Malaysia" },
-  { code: "MX", flag: "🇲🇽", name: "Mexico" },
-  { code: "MA", flag: "🇲🇦", name: "Morocco" },
-  { code: "NL", flag: "🇳🇱", name: "Netherlands" },
-  { code: "NZ", flag: "🇳🇿", name: "New Zealand" },
-  { code: "NG", flag: "🇳🇬", name: "Nigeria" },
-  { code: "NO", flag: "🇳🇴", name: "Norway" },
-  { code: "PK", flag: "🇵🇰", name: "Pakistan" },
-  { code: "PE", flag: "🇵🇪", name: "Peru" },
-  { code: "PH", flag: "🇵🇭", name: "Philippines" },
-  { code: "PL", flag: "🇵🇱", name: "Poland" },
-  { code: "PT", flag: "🇵🇹", name: "Portugal" },
-  { code: "RO", flag: "🇷🇴", name: "Romania" },
-  { code: "RU", flag: "🇷🇺", name: "Russia" },
-  { code: "SA", flag: "🇸🇦", name: "Saudi Arabia" },
-  { code: "RS", flag: "🇷🇸", name: "Serbia" },
-  { code: "SG", flag: "🇸🇬", name: "Singapore" },
-  { code: "SK", flag: "🇸🇰", name: "Slovakia" },
-  { code: "ZA", flag: "🇿🇦", name: "South Africa" },
-  { code: "ES", flag: "🇪🇸", name: "Spain" },
-  { code: "SE", flag: "🇸🇪", name: "Sweden" },
-  { code: "CH", flag: "🇨🇭", name: "Switzerland" },
-  { code: "TW", flag: "🇹🇼", name: "Taiwan" },
-  { code: "TH", flag: "🇹🇭", name: "Thailand" },
-  { code: "TR", flag: "🇹🇷", name: "Turkey" },
-  { code: "UA", flag: "🇺🇦", name: "Ukraine" },
-  { code: "AE", flag: "🇦🇪", name: "UAE" },
-  { code: "GB", flag: "🇬🇧", name: "United Kingdom" },
-  { code: "US", flag: "🇺🇸", name: "United States" },
-  { code: "VN", flag: "🇻🇳", name: "Vietnam" },
-];
-
-const COUNTRY_MAP = Object.fromEntries(COUNTRIES.map((c) => [c.code, c]));
 
 const USERNAME_RE = /^[a-zA-Z0-9_]{3,16}$/;
 
@@ -1604,6 +1532,7 @@ function PageInner() {
   const [challengeWaiting, setChallengeWaiting] = useState<{ friendId: string; challengeId: string } | null>(null);
   const [friendToast, setFriendToast]           = useState<string | null>(null);
   const [onlineFriends, setOnlineFriends]       = useState<Set<string>>(new Set());
+  const [dashboardSocketConnected, setDashboardSocketConnected] = useState(false);
   const dashboardSocketRef = useRef<Socket | null>(null);
 
   // Session
@@ -1764,7 +1693,12 @@ function PageInner() {
     dashboardSocketRef.current = socket;
 
     socket.on("connect", () => {
+      setDashboardSocketConnected(true);
       socket.emit("auth.guest", { username: profile.username }, () => {});
+    });
+
+    socket.on("disconnect", () => {
+      setDashboardSocketConnected(false);
     });
 
     socket.on("challenge.received", (data: IncomingChallenge) => {
@@ -1790,20 +1724,30 @@ function PageInner() {
     });
 
     return () => {
+      setDashboardSocketConnected(false);
       socket.disconnect();
       dashboardSocketRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.access_token, profile?.username]);
 
-  // Request online status for friends when friends list loads
-  useEffect(() => {
+  const requestFriendStatuses = useCallback(() => {
     const socket = dashboardSocketRef.current;
-    if (!socket?.connected || friends.length === 0) return;
-    socket.emit("friends.status", { friendIds: friends.map(f => f.id) }, (online: string[]) => {
+    if (!socket?.connected) return;
+    if (friends.length === 0) {
+      setOnlineFriends(new Set());
+      return;
+    }
+
+    socket.emit("friends.status", { friendIds: friends.map((f) => f.id) }, (online: string[]) => {
       setOnlineFriends(new Set(online));
     });
   }, [friends]);
+
+  // Request online status once the socket is connected and whenever the friend list changes.
+  useEffect(() => {
+    requestFriendStatuses();
+  }, [dashboardSocketConnected, requestFriendStatuses]);
 
   function handleChallenge(friendId: string, mode: Mode) {
     const socket = dashboardSocketRef.current;

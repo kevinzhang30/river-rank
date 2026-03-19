@@ -10,6 +10,7 @@ export interface PublicPlayer {
   isToAct:  boolean;
   folded:   boolean;
   elo:      number;
+  country:  string | null;
 }
 
 export interface LegalActions {

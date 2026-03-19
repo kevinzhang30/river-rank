@@ -90,6 +90,8 @@ export interface InternalGameState {
   handStartStacks: Record<string, number>;
   /** Elo ratings at match creation, keyed by player id. Used to compute final elo delta. */
   playerElos:      Record<string, number>;
+  /** Country codes at match creation, keyed by player id. */
+  playerCountries: Record<string, string | null>;
   /** Set when a hand ends; cleared when the next hand begins. */
   handResult?:     HandResult;
   /** Configurable turn length in ms. */

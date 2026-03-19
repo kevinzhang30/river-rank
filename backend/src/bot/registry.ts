@@ -8,6 +8,7 @@ export interface BotProfile {
   id: string;
   username: string;
   elo: number;
+  country: string | null;
   style: BotStyle;
   enabled: boolean;
   rankedEnabled: boolean;
@@ -33,7 +34,7 @@ const MAX_RECENT = 5;
 export async function loadBotRegistry(): Promise<void> {
   const { data: profiles, error: profilesError } = await supabaseAdmin
     .from("profiles")
-    .select("id, username, elo")
+    .select("id, username, elo, country")
     .eq("is_bot", true);
 
   if (profilesError) throw profilesError;
@@ -58,6 +59,7 @@ export async function loadBotRegistry(): Promise<void> {
       id: bot.id,
       username: bot.username ?? "Bot",
       elo: bot.elo,
+      country: bot.country ?? null,
       style: (cfg?.style as BotStyle) ?? "balanced",
       enabled: cfg?.enabled ?? true,
       rankedEnabled: cfg?.ranked_enabled ?? true,

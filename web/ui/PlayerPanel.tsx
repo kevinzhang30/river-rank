@@ -3,6 +3,7 @@
 import type { PublicPlayer, HandResult } from "./types";
 import { Card, FacedownCard } from "./Card";
 import { useIsMobile } from "@/lib/useIsMobile";
+import { COUNTRY_MAP } from "@/lib/countries";
 
 function DealerChip() {
   return (
@@ -99,6 +100,9 @@ export function PlayerPanel({ player, isHero, holeCards, handResult, turnDeadlin
       {/* Name row */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {player.isDealer && <DealerChip />}
+        {player.country && COUNTRY_MAP[player.country] && (
+          <span style={{ fontSize: 14, lineHeight: 1 }}>{COUNTRY_MAP[player.country].flag}</span>
+        )}
         <span
           style={{
             color:         !handResult && active ? "var(--text)" : "var(--text2)",
