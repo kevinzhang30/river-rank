@@ -2276,23 +2276,21 @@ io.on("connection", (socket: Socket) => {
           const state = matches.get(matchId);
           if (state && !state.ended) {
             const isBotMatch = state.players.some((p) => isBot(p.id));
-            if (isBotMatch) {
-              forfeitMatch(state, user.userId, "DISCONNECT");
-            } else {
-              // 30s grace period for reconnection
-              const timer = setTimeout(() => {
-                delete state.disconnectedPlayers[user.userId];
-                if (!state.ended) {
-                  forfeitMatch(state, user.userId, "DISCONNECT");
-                }
-              }, 30_000);
-              state.disconnectedPlayers[user.userId] = { since: Date.now(), timer };
+            const gracePeriod = isBotMatch ? 10_000 : 30_000;
+            const timer = setTimeout(() => {
+              delete state.disconnectedPlayers[user.userId];
+              if (!state.ended) {
+                forfeitMatch(state, user.userId, "DISCONNECT");
+              }
+            }, gracePeriod);
+            state.disconnectedPlayers[user.userId] = { since: Date.now(), timer };
+            if (!isBotMatch) {
               io.to(`match:${matchId}`).emit("player.disconnected", {
                 userId: user.userId,
                 username: user.username,
               });
-              console.log(`[disconnect] ${user.username} — 30s grace period started`);
             }
+            console.log(`[disconnect] ${user.username} — ${gracePeriod / 1000}s grace period started${isBotMatch ? " (bot match)" : ""}`);
           }
         }
 
