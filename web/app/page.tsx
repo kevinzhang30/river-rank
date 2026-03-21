@@ -7,6 +7,8 @@ import { io, Socket } from "socket.io-client";
 import { supabase } from "@/lib/supabaseClient";
 import { ThemeToggle } from "@/ui/ThemeToggle";
 import { DeckToggle } from "@/ui/DeckToggle";
+import { InboxPanel } from "@/ui/InboxPanel";
+import type { Notification } from "@/ui/InboxPanel";
 import { useIsMobile } from "@/lib/useIsMobile";
 import type { LeaderboardEntry, Mode } from "@/ui/types";
 import { COUNTRIES, COUNTRY_MAP } from "@/lib/countries";
@@ -1623,6 +1625,15 @@ function PageInner() {
   const [dashboardSocketConnected, setDashboardSocketConnected] = useState(false);
   const dashboardSocketRef = useRef<Socket | null>(null);
 
+  // Inbox state
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [inboxOpen, setInboxOpen]         = useState(false);
+
+  const unreadCount = useMemo(
+    () => notifications.filter((n) => !n.read).length,
+    [notifications],
+  );
+
   const sortedFriends = useMemo(() => {
     const sorted = [...friends];
     switch (friendsSort) {
@@ -1802,6 +1813,41 @@ function PageInner() {
 
     return () => { supabase.removeChannel(channel); };
   }, [session]);
+
+  // Fetch initial notifications + realtime subscription for new ones
+  useEffect(() => {
+    if (!session) return;
+    const userId = session.user.id;
+
+    supabase
+      .from("notifications")
+      .select("id, type, data, read, created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(50)
+      .then(({ data }) => {
+        if (data) setNotifications(data as Notification[]);
+      });
+
+    const channel = supabase
+      .channel("notifications")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${userId}` },
+        (payload) => {
+          const row = payload.new as Notification;
+          setNotifications((prev) => [row, ...prev]);
+        },
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [session]);
+
+  async function handleMarkAllRead() {
+    await supabase.rpc("mark_notifications_read");
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  }
 
   // Dashboard socket for challenges & online status
   useEffect(() => {
@@ -2104,7 +2150,46 @@ function PageInner() {
         }}
       >
         <span className="wordmark" style={{ fontWeight: 800, fontSize: 13 }}>RiverRank.io ♠</span>
-        <div ref={menuRef} style={{ position: "relative" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* Inbox toggle */}
+          <button
+            onClick={() => setInboxOpen((o) => !o)}
+            style={{
+              background:   "transparent",
+              border:       "none",
+              cursor:       "pointer",
+              color:        "var(--text3)",
+              fontSize:     14,
+              fontFamily:   "monospace",
+              padding:      "4px 6px",
+              borderRadius: 4,
+              position:     "relative",
+            }}
+          >
+            ✉
+            {unreadCount > 0 && (
+              <span style={{
+                position:       "absolute",
+                top:            0,
+                right:          0,
+                background:     "var(--danger)",
+                color:          "#fff",
+                fontSize:       9,
+                fontWeight:     800,
+                borderRadius:   "50%",
+                width:          14,
+                height:         14,
+                display:        "flex",
+                alignItems:     "center",
+                justifyContent: "center",
+                lineHeight:     1,
+              }}>
+                {unreadCount > 9 ? "9+" : unreadCount}
+              </span>
+            )}
+          </button>
+          {/* User menu */}
+          <div ref={menuRef} style={{ position: "relative" }}>
           <button
             onClick={() => setMenuOpen(o => !o)}
             style={{
@@ -2159,7 +2244,15 @@ function PageInner() {
             </div>
           )}
         </div>
+        </div>
       </header>
+
+      <InboxPanel
+        open={inboxOpen}
+        onClose={() => setInboxOpen(false)}
+        notifications={notifications}
+        onMarkAllRead={handleMarkAllRead}
+      />
 
       {/* Main content */}
       <main
