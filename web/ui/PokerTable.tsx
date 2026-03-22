@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import type { PublicGameState, HandResult } from "./types";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { PublicGameState, HandResult, EmoteEvent } from "./types";
+import type { EmoteDefinition } from "@/lib/emotes";
 import { Card, EmptyCardSlot } from "./Card";
 import { PlayerPanel } from "./PlayerPanel";
 import { ActionBar } from "./ActionBar";
@@ -9,6 +10,8 @@ import { ActionLog } from "./ActionLog";
 import { ThemeToggle } from "./ThemeToggle";
 import { DeckToggle } from "./DeckToggle";
 import { HandCheatSheet } from "./HandCheatSheet";
+import { EmoteBubble } from "./EmoteOverlay";
+import { EmotePicker } from "./EmotePicker";
 import { useIsMobile } from "@/lib/useIsMobile";
 
 const STREET_LABEL: Record<string, string> = {
@@ -37,6 +40,11 @@ interface Props {
   pendingResult?: { winnerId: string; winnerUsername: string; ratingDelta: Record<string, number> | null; reason?: string } | null;
   onViewResults?: () => void;
   spectatorMode?: boolean;
+  activeEmotes?: EmoteEvent[];
+  onSendEmote?: (emoteId: string) => void;
+  onEmoteComplete?: (id: string) => void;
+  equippedEmotes?: EmoteDefinition[];
+  emoteRegistry?: Record<string, EmoteDefinition>;
 }
 
 export function PokerTable({
@@ -57,6 +65,11 @@ export function PokerTable({
   pendingResult,
   onViewResults,
   spectatorMode,
+  activeEmotes,
+  onSendEmote,
+  onEmoteComplete,
+  equippedEmotes,
+  emoteRegistry,
 }: Props) {
   const [, setTick] = useState(0);
   const handResultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -64,6 +77,8 @@ export function PokerTable({
   const [pickingCard, setPickingCard] = useState(false);
   const [forfeitConfirm, setForfeitConfirm] = useState(false);
   const forfeitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showEmotePicker, setShowEmotePicker] = useState(false);
+  const [emoteCooldownUntil, setEmoteCooldownUntil] = useState(0);
 
   // Pre-action state
   type PreAction = "fold-check" | { type: "raise"; amount: number } | null;
@@ -133,6 +148,21 @@ export function PokerTable({
     heroHoleCards !== null;
 
   const isMobile = useIsMobile();
+
+  // Latest emote per player (for inline speech bubbles)
+  const latestEmoteFor = useMemo(() => {
+    const map = new Map<string, EmoteEvent>();
+    for (const e of activeEmotes ?? []) {
+      const existing = map.get(e.actorUserId);
+      if (!existing || e.createdAt > existing.createdAt) {
+        map.set(e.actorUserId, e);
+      }
+    }
+    return map;
+  }, [activeEmotes]);
+
+  const opponentEmote = latestEmoteFor.get(opponent.userId);
+  const heroEmote = latestEmoteFor.get(heroUserId);
 
   const legal = state.legalActions ?? (
     hero.isToAct && !hero.folded
@@ -205,12 +235,15 @@ export function PokerTable({
       } else if (key === " " && readyVisible) {
         e.preventDefault();
         onReady?.();
+      } else if (key === "e" && !spectatorMode && onSendEmote) {
+        e.preventDefault();
+        setShowEmotePicker((v) => !v);
       }
     }
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isMobile, hero.isToAct, legal, readyVisible, showPreActions, preAction, onFold, onCheck, onCall, onRaise, onReady]);
+  }, [isMobile, hero.isToAct, legal, readyVisible, showPreActions, preAction, onFold, onCheck, onCall, onRaise, onReady, spectatorMode, onSendEmote]);
 
   return (
     <div
@@ -377,14 +410,19 @@ export function PokerTable({
             display:        "flex",
             flexDirection:  "column",
             alignItems:     "center",
-            justifyContent: "space-between",
-            padding:        isMobile ? "12px 8px" : "28px 32px",
-            overflow:       "hidden",
+            justifyContent: isMobile ? "space-between" : "center",
+            gap:            isMobile ? undefined : 32,
+            padding:        isMobile ? "12px 8px" : "16px 32px",
+            overflow:       "visible",
             background:     "var(--bg)",
+            position:       "relative",
           }}
         >
           {/* Opponent */}
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+            {opponentEmote && emoteRegistry && onEmoteComplete && (
+              <EmoteBubble emote={opponentEmote} emoteRegistry={emoteRegistry} onComplete={onEmoteComplete} />
+            )}
             <PlayerPanel
               player={opponent}
               isHero={false}
@@ -534,14 +572,58 @@ export function PokerTable({
 
           {/* Hero */}
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
-            <PlayerPanel
-              player={hero}
-              isHero={true}
-              holeCards={heroHoleCards}
-              handResult={activeHandResult}
-              turnDeadlineMs={state.turnDeadlineMs}
-              handCategory={heroCategory}
-            />
+            {heroEmote && emoteRegistry && onEmoteComplete && (
+              <EmoteBubble emote={heroEmote} emoteRegistry={emoteRegistry} onComplete={onEmoteComplete} />
+            )}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <PlayerPanel
+                player={hero}
+                isHero={true}
+                holeCards={heroHoleCards}
+                handResult={activeHandResult}
+                turnDeadlineMs={state.turnDeadlineMs}
+                handCategory={heroCategory}
+              />
+              {/* Emote trigger */}
+              {!spectatorMode && onSendEmote && (
+                <div style={{ position: "relative" }}>
+                  {showEmotePicker && emoteRegistry && (
+                    <EmotePicker
+                      equippedEmotes={equippedEmotes ?? []}
+                      onSelect={(emoteId) => {
+                        onSendEmote(emoteId);
+                        setShowEmotePicker(false);
+                        setEmoteCooldownUntil(Date.now() + 3000);
+                      }}
+                      onClose={() => setShowEmotePicker(false)}
+                      cooldownActive={Date.now() < emoteCooldownUntil}
+                    />
+                  )}
+                  <button
+                    onClick={() => setShowEmotePicker((v) => !v)}
+                    title="Send emote"
+                    style={{
+                      background: "var(--surface2)",
+                      color: "var(--text2)",
+                      border: "1px solid var(--border)",
+                      borderRadius: "50%",
+                      width: 32,
+                      height: 32,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 14,
+                      cursor: "pointer",
+                      padding: 0,
+                      opacity: Date.now() < emoteCooldownUntil ? 0.5 : 1,
+                      transition: "opacity 0.15s",
+                    }}
+                  >
+                    💬
+                  </button>
+                </div>
+              )}
+            </div>
 
             {/* Reveal buttons (fold only, before hero reveals) */}
             {showRevealButtons && !pickingCard && (
@@ -625,6 +707,7 @@ export function PokerTable({
               </div>
             )}
           </div>
+
         </div>
 
         {/* Activity log */}
@@ -632,19 +715,21 @@ export function PokerTable({
       </div>
 
       {/* ── Action bar ───────────────────────────────────────────────── */}
-      {!spectatorMode && <ActionBar
-        legal={legal}
-        pot={state.pot}
-        bigBlind={state.bigBlind}
-        onFold={onFold}
-        onCheck={onCheck}
-        onCall={onCall}
-        onRaise={onRaise}
-        preAction={preAction}
-        onPreAction={setPreAction}
-        showPreActions={showPreActions}
-        preBetInvalid={preBetInvalid}
-      />}
+      {!spectatorMode && (
+        <ActionBar
+          legal={legal}
+          pot={state.pot}
+          bigBlind={state.bigBlind}
+          onFold={onFold}
+          onCheck={onCheck}
+          onCall={onCall}
+          onRaise={onRaise}
+          preAction={preAction}
+          onPreAction={setPreAction}
+          showPreActions={showPreActions}
+          preBetInvalid={preBetInvalid}
+        />
+      )}
 
       {!spectatorMode && !isMobile && (hero.isToAct || showPreActions || readyVisible) && (
         <div
