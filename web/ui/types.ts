@@ -97,3 +97,10 @@ export interface LeaderboardEntry {
   losses:      number;
   country:     string | null;
 }
+
+export interface EmoteEvent {
+  id:          string; // dedup key: `${actorUserId}-${createdAt}`
+  actorUserId: string;
+  emoteId:     string;
+  createdAt:   number;
+}

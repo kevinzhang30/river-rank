@@ -26,6 +26,9 @@ import {
 } from "./bot/registry";
 import { prisma } from "./db";
 import { supabaseAdmin } from "./db/supabaseAdmin";
+import {
+  loadEmotes, isValidEmoteId, fetchOwnedEmotes, fetchEquippedEmotes,
+} from "./emotes";
 
 // ── User type ─────────────────────────────────────────────────────────────────
 
@@ -95,6 +98,10 @@ let matchCounter    = 0;
 const botDifficulties = new Map<string, BotDifficulty>(); // matchId → difficulty
 const botTimers       = new Map<string, ReturnType<typeof setTimeout>>(); // matchId → timer
 const queueTimers     = new Map<string, ReturnType<typeof setTimeout>>(); // userId → timer
+
+// emotes
+const emoteCooldowns = new Map<string, number>(); // "matchId:userId" → last emote timestamp
+const EMOTE_COOLDOWN_MS = 3_000;
 
 // challenges
 interface PendingChallenge {
@@ -740,6 +747,7 @@ function forfeitMatch(
   if (state.tournamentMatchId) tournamentMatchToGameMatch.delete(state.tournamentMatchId);
   for (const p of state.players) {
     activeMatches.delete(p.id);
+    emoteCooldowns.delete(`${state.matchId}:${p.id}`);
   }
 
   const matchId    = state.matchId;
@@ -1050,10 +1058,19 @@ async function createMatch(
 
   const room = `match:${matchId}`;
   for (const sid of io.sockets.adapter.rooms.get(`user:${sbUser.userId}`) ?? []) {
-    io.sockets.sockets.get(sid)?.join(room);
+    const s = io.sockets.sockets.get(sid);
+    s?.join(room);
+    // Refresh equipped emotes on match start so lobby loadout changes take effect
+    if (s && !isBot(sbUser.userId)) {
+      fetchEquippedEmotes(supabaseAdmin, sbUser.userId).then(eq => { s.data.equippedEmotes = eq; });
+    }
   }
   for (const sid of io.sockets.adapter.rooms.get(`user:${bbUser.userId}`) ?? []) {
-    io.sockets.sockets.get(sid)?.join(room);
+    const s = io.sockets.sockets.get(sid);
+    s?.join(room);
+    if (s && !isBot(bbUser.userId)) {
+      fetchEquippedEmotes(supabaseAdmin, bbUser.userId).then(eq => { s.data.equippedEmotes = eq; });
+    }
   }
 
   io.to(`user:${sbUser.userId}`).emit("match.found", {
@@ -1394,6 +1411,25 @@ io.on("connection", (socket: Socket) => {
 
       users.set(socket.id, user);
       socket.join(`user:${user.userId}`);
+
+      // Cache owned emotes for emote validation
+      socket.data.ownedEmotes = await fetchOwnedEmotes(supabaseAdmin, verifiedId);
+      socket.data.equippedEmotes = await fetchEquippedEmotes(supabaseAdmin, verifiedId);
+
+      // Early-adopter claim (first 100 non-bot users get 4 exclusive emotes)
+      try {
+        const { data: claimResult } = await supabaseAdmin.rpc("claim_early_adopter_emotes", {
+          p_user_id: verifiedId,
+        });
+        if (claimResult === "claimed") {
+          console.log(`[early-adopter] ${user.username} claimed emotes`);
+          // Refresh owned emotes cache so new emotes work immediately
+          socket.data.ownedEmotes = await fetchOwnedEmotes(supabaseAdmin, verifiedId);
+        }
+      } catch (err) {
+        console.error("[early-adopter] claim error:", err);
+      }
+
       console.log(`[auth] ${user.username} (${user.userId.slice(0, 8)}) elo=${user.elo}`);
       ack({ userId: user.userId, username: user.username, elo: user.elo });
 
@@ -1604,6 +1640,48 @@ io.on("connection", (socket: Socket) => {
     if (!state.players.some((p) => p.id === user.userId)) return;
     forfeitMatch(state, user.userId, "FORFEIT");
   });
+
+  // ── Emotes ────────────────────────────────────────────────────────────────
+
+  socket.on(
+    "emote.send",
+    ({ matchId, emoteId }: { matchId: string; emoteId: string }, ack?: (r: string) => void) => {
+      const respond = (code: string) => { ack?.(code); };
+      const user = users.get(socket.id);
+      if (!user) return respond("no_user");
+
+      const state = matches.get(matchId);
+      if (!state) return respond("no_match");
+      if (!state.players.some((p) => p.id === user.userId)) return respond("not_in_match");
+
+      if (!isValidEmoteId(emoteId)) return respond("bad_emote");
+
+      const owned: Set<string> | undefined = socket.data.ownedEmotes;
+      if (!owned || !owned.has(emoteId)) return respond("not_owned");
+
+      const equipped: Set<string> | undefined = socket.data.equippedEmotes;
+      if (!equipped || !equipped.has(emoteId)) return respond("not_equipped");
+
+      const cooldownKey = `${matchId}:${user.userId}`;
+      const now = Date.now();
+      const lastSent = emoteCooldowns.get(cooldownKey) ?? 0;
+      if (now - lastSent < EMOTE_COOLDOWN_MS) return respond("cooldown");
+      emoteCooldowns.set(cooldownKey, now);
+
+      io.to(`match:${matchId}`).emit("emote.event", {
+        actorUserId: user.userId,
+        emoteId,
+        createdAt: now,
+      });
+      io.to(`spectate:${matchId}`).emit("emote.event", {
+        actorUserId: user.userId,
+        emoteId,
+        createdAt: now,
+      });
+
+      respond("ok");
+    },
+  );
 
   // ── Friends & challenges ──────────────────────────────────────────────────
 
@@ -2313,11 +2391,11 @@ io.on("connection", (socket: Socket) => {
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 
-loadBotRegistry()
+Promise.all([loadBotRegistry(), loadEmotes(supabaseAdmin)])
   .then(() => {
     httpServer.listen(4000, () => console.log("Backend running on http://localhost:4000"));
   })
   .catch((err) => {
-    console.error("[bot-registry] failed to load, starting without bots:", err);
-    httpServer.listen(4000, () => console.log("Backend running on http://localhost:4000 (no bot registry)"));
+    console.error("[startup] partial init failure, starting anyway:", err);
+    httpServer.listen(4000, () => console.log("Backend running on http://localhost:4000 (partial init)"));
   });

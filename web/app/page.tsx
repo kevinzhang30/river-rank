@@ -11,6 +11,8 @@ import { InboxPanel } from "@/ui/InboxPanel";
 import type { Notification } from "@/ui/InboxPanel";
 import { useIsMobile } from "@/lib/useIsMobile";
 import type { LeaderboardEntry, Mode } from "@/ui/types";
+import type { EmoteDefinition } from "@/lib/emotes";
+import { rowToEmoteDefinition, getEmoteImageUrl } from "@/lib/emotes";
 import { COUNTRIES, COUNTRY_MAP } from "@/lib/countries";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4000";
@@ -654,6 +656,215 @@ function AccountCard({
           </button>
         </div>
       </div>
+    </Card>
+  );
+}
+
+// ── Emote loadout card ───────────────────────────────────────────────────────
+
+function EmoteLoadoutCard({ userId }: { userId: string }) {
+  const [allEmotes, setAllEmotes]         = useState<(EmoteDefinition & { tier: string })[]>([]);
+  const [ownedIds, setOwnedIds]           = useState<Set<string>>(new Set());
+  const [equipped, setEquipped]           = useState<(EmoteDefinition | null)[]>([null, null, null, null]);
+  const [pickingSlot, setPickingSlot]     = useState<number | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const [{ data: emotes }, { data: owned }, { data: eq }] = await Promise.all([
+        supabase.from("emotes").select("id, name, image_url, asset_type, tier").order("sort_order"),
+        supabase.from("user_emotes").select("emote_id").eq("user_id", userId),
+        supabase.from("equipped_emotes").select("slot, emote_id, emotes(id, name, image_url, asset_type)").eq("user_id", userId).order("slot"),
+      ]);
+
+      const defs = (emotes ?? []).map((r: any) => ({ ...rowToEmoteDefinition(r), tier: r.tier }));
+      setAllEmotes(defs as any);
+      setOwnedIds(new Set((owned ?? []).map((r: any) => r.emote_id)));
+
+      const slots: (EmoteDefinition | null)[] = [null, null, null, null];
+      for (const row of eq ?? []) {
+        const r = row as any;
+        if (r.emotes && r.slot >= 0 && r.slot <= 3) {
+          slots[r.slot] = rowToEmoteDefinition(r.emotes);
+        }
+      }
+      setEquipped(slots);
+    })();
+  }, [userId]);
+
+  async function equipEmote(slot: number, emote: EmoteDefinition) {
+    // Remove if already in another slot
+    const existingSlot = equipped.findIndex((e) => e?.id === emote.id);
+    if (existingSlot !== -1 && existingSlot !== slot) {
+      await supabase.from("equipped_emotes").delete().eq("user_id", userId).eq("slot", existingSlot);
+    }
+
+    await supabase.from("equipped_emotes").upsert(
+      { user_id: userId, slot, emote_id: emote.id },
+      { onConflict: "user_id,slot" },
+    );
+
+    setEquipped((prev) => {
+      const next = [...prev];
+      if (existingSlot !== -1) next[existingSlot] = null;
+      next[slot] = emote;
+      return next;
+    });
+    setPickingSlot(null);
+  }
+
+  async function unequipSlot(slot: number) {
+    await supabase.from("equipped_emotes").delete().eq("user_id", userId).eq("slot", slot);
+    setEquipped((prev) => {
+      const next = [...prev];
+      next[slot] = null;
+      return next;
+    });
+  }
+
+  return (
+    <Card>
+      <CardLabel>Emotes</CardLabel>
+      <div style={{ display: "flex", gap: 8 }}>
+        {equipped.map((emote, slot) => (
+          <button
+            key={slot}
+            onClick={() => setPickingSlot(pickingSlot === slot ? null : slot)}
+            style={{
+              width: 56,
+              height: 56,
+              borderRadius: 8,
+              border: pickingSlot === slot
+                ? "2px solid var(--primaryBtn)"
+                : "1px solid var(--border)",
+              background: "var(--surface2)",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 0,
+              position: "relative",
+            }}
+            title={emote ? emote.name : `Slot ${slot + 1} (empty)`}
+          >
+            {emote ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={getEmoteImageUrl(emote)}
+                alt={emote.name}
+                width={44}
+                height={44}
+                style={{ borderRadius: 4 }}
+                draggable={false}
+              />
+            ) : (
+              <span style={{ fontSize: 20, color: "var(--text3)" }}>+</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Slot picker modal */}
+      {pickingSlot !== null && (
+        <div style={{ marginTop: 12 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 8,
+            }}
+          >
+            <span style={{ fontSize: 10, color: "var(--text3)", letterSpacing: 1, textTransform: "uppercase", fontWeight: 700 }}>
+              Slot {pickingSlot + 1}
+            </span>
+            <div style={{ display: "flex", gap: 6 }}>
+              {equipped[pickingSlot] && (
+                <button
+                  onClick={() => unequipSlot(pickingSlot)}
+                  style={{
+                    background: "transparent",
+                    border: "1px solid var(--danger)",
+                    borderRadius: 3,
+                    color: "var(--danger)",
+                    fontSize: 9,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    padding: "2px 8px",
+                    fontFamily: "monospace",
+                    letterSpacing: 1,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Remove
+                </button>
+              )}
+              <button
+                onClick={() => setPickingSlot(null)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "var(--text3)",
+                  fontSize: 14,
+                  cursor: "pointer",
+                  padding: "0 4px",
+                }}
+              >
+                ×
+              </button>
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
+            {allEmotes.map((emote) => {
+              const owned = ownedIds.has(emote.id);
+              const isEquipped = equipped.some((e) => e?.id === emote.id);
+              return (
+                <button
+                  key={emote.id}
+                  onClick={() => owned && equipEmote(pickingSlot, emote)}
+                  disabled={!owned}
+                  style={{
+                    width: "100%",
+                    aspectRatio: "1",
+                    borderRadius: 6,
+                    border: isEquipped
+                      ? "2px solid var(--primaryBtn)"
+                      : "1px solid var(--border)",
+                    background: "var(--surface2)",
+                    cursor: owned ? "pointer" : "not-allowed",
+                    opacity: owned ? 1 : 0.35,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: 4,
+                    position: "relative",
+                  }}
+                  title={owned ? emote.name : `${emote.name} (locked)`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={getEmoteImageUrl(emote)}
+                    alt={emote.name}
+                    style={{ width: "100%", height: "100%", objectFit: "contain", borderRadius: 4 }}
+                    draggable={false}
+                  />
+                  {!owned && (
+                    <span
+                      style={{
+                        position: "absolute",
+                        bottom: 2,
+                        right: 2,
+                        fontSize: 10,
+                      }}
+                    >
+                      🔒
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </Card>
   );
 }
@@ -1383,6 +1594,7 @@ function ChooseUsernameView({
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+          <label style={{ fontSize: 14, fontWeight: 600, color: "var(--text2)", fontFamily: "monospace" }}>Username</label>
           <input
             value={value}
             onChange={(e) => { setValue(e.target.value); setSubmitError(null); }}
@@ -2280,6 +2492,7 @@ function PageInner() {
               dashboardSocket={dashboardSocketRef.current}
               onNavigate={(path) => router.push(path)}
             />
+            {session?.user?.id && <EmoteLoadoutCard userId={session.user.id} />}
             <div ref={settingsRef}>
               <AccountCard
                 onSignOut={signOut}

@@ -87,3 +87,8 @@ input[type="number"] {
   0%, 100% { box-shadow: 0 0 4px rgba(59, 91, 219, 0.4); }
   50%      { box-shadow: 0 0 14px rgba(59, 91, 219, 0.7), 0 0 24px rgba(59, 91, 219, 0.3); }
 }
+
+@keyframes emote-burst {
+  0%   { transform: scale(0.3); opacity: 0.6; }
+  100% { transform: scale(2.5); opacity: 0; }
+}

@@ -13,7 +13,9 @@ import {
   isBackendGameState,
   type BackendGameState,
 } from "@/ui/adapters";
-import type { PublicGameState, PublicPlayer, Mode } from "@/ui/types";
+import type { PublicGameState, PublicPlayer, Mode, EmoteEvent } from "@/ui/types";
+import type { EmoteDefinition } from "@/lib/emotes";
+import { rowToEmoteDefinition } from "@/lib/emotes";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4000";
 
@@ -64,6 +66,9 @@ function GameView() {
   const [opponentBestHand, setOpponentBestHand] = useState<string | null>(null);
   const [rawBackendState, setRawBackendState] = useState<BackendGameState | null>(null);
   const [opponentDisconnectedAt, setOpponentDisconnectedAt] = useState<number | null>(null);
+  const [activeEmotes, setActiveEmotes] = useState<EmoteEvent[]>([]);
+  const [equippedEmotes, setEquippedEmotes] = useState<EmoteDefinition[]>([]);
+  const [emoteRegistry, setEmoteRegistry] = useState<Record<string, EmoteDefinition>>({});
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
@@ -174,6 +179,12 @@ function GameView() {
         },
       );
 
+      socket.on("emote.event", ({ actorUserId, emoteId, createdAt }: { actorUserId: string; emoteId: string; createdAt: number }) => {
+        console.log("[emote.event] received:", { actorUserId, emoteId, createdAt });
+        const id = `${actorUserId}-${createdAt}`;
+        setActiveEmotes((prev) => [...prev, { id, actorUserId, emoteId, createdAt }]);
+      });
+
       socket.on("player.disconnected", () => {
         setOpponentDisconnectedAt(Date.now());
       });
@@ -197,6 +208,39 @@ function GameView() {
 
     return () => { socketRef.current?.disconnect(); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch equipped emotes when userId is available
+  useEffect(() => {
+    if (!userId) return;
+    (async () => {
+      // Fetch all emotes for the registry
+      const { data: allEmotes } = await supabase
+        .from("emotes")
+        .select("id, name, image_url, asset_type")
+        .order("sort_order");
+      const reg: Record<string, EmoteDefinition> = {};
+      for (const row of allEmotes ?? []) {
+        reg[row.id] = rowToEmoteDefinition(row);
+      }
+      setEmoteRegistry(reg);
+
+      // Fetch equipped emotes (joined with emotes table)
+      const { data: equipped } = await supabase
+        .from("equipped_emotes")
+        .select("slot, emote_id, emotes(id, name, image_url, asset_type)")
+        .eq("user_id", userId)
+        .order("slot");
+
+      if (equipped && equipped.length > 0) {
+        setEquippedEmotes(
+          equipped
+            .filter((e: any) => e.emotes)
+            .map((e: any) => rowToEmoteDefinition(e.emotes)),
+        );
+      }
+      // No fallback — only show emotes the player explicitly equipped in the lobby
+    })();
+  }, [userId]);
 
   // Tick every second while in queue to update countdown
   useEffect(() => {
@@ -223,6 +267,17 @@ function GameView() {
   function sendForfeit() {
     if (!matchId) return;
     socketRef.current?.emit("game.forfeit", { matchId });
+  }
+
+  function sendEmote(emoteId: string) {
+    if (!matchId) return;
+    socketRef.current?.emit("emote.send", { matchId, emoteId }, (ack: string) => {
+      console.log("[emote.send] ack:", ack);
+    });
+  }
+
+  function handleEmoteComplete(id: string) {
+    setActiveEmotes((prev) => prev.filter((e) => e.id !== id));
   }
 
   function backToLobby() {
@@ -353,6 +408,11 @@ function GameView() {
           opponentDisconnectedAt={opponentDisconnectedAt}
           pendingResult={pendingResult}
           onViewResults={() => { setMatchResult(pendingResult); setPendingResult(null); }}
+          activeEmotes={activeEmotes}
+          onSendEmote={sendEmote}
+          onEmoteComplete={handleEmoteComplete}
+          equippedEmotes={equippedEmotes}
+          emoteRegistry={emoteRegistry}
         />
         {process.env.NEXT_PUBLIC_DEBUG === "true" && <DebugPanel state={debugState} />}
 

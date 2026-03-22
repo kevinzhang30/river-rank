@@ -31,6 +31,12 @@ function renderNotification(n: Notification): { icon: string; text: string } {
       return { icon: "+", text: `${n.data.from_username} added you as a friend` };
     case "challenge_received":
       return { icon: "!", text: `${n.data.from_username} challenged you (${n.data.mode})` };
+    case "emote_unlocked":
+      return { icon: "★", text: `Unlocked emote: ${n.data.emote_name} — ${n.data.reason}` };
+    case "announcement":
+      return { icon: "!", text: n.data.message ?? "New update available" };
+    case "early_adopter":
+      return { icon: "★", text: n.data.message ?? "You received exclusive emotes!" };
     default:
       return { icon: "?", text: n.type };
   }
