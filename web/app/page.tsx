@@ -1383,6 +1383,7 @@ function ChooseUsernameView({
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+          <label style={{ fontSize: 14, fontWeight: 600, color: "var(--text2)", fontFamily: "monospace" }}>Username</label>
           <input
             value={value}
             onChange={(e) => { setValue(e.target.value); setSubmitError(null); }}
