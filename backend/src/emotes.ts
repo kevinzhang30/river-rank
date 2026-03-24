@@ -7,6 +7,7 @@ export interface EmoteRow {
   asset_type: "static" | "sprite";
   tier: "free" | "achievement" | "premium";
   sort_order: number;
+  sound_url: string | null;
 }
 
 /** In-memory cache of all emotes, loaded from DB on startup. */
@@ -16,7 +17,7 @@ let emoteCache = new Map<string, EmoteRow>();
 export async function loadEmotes(supabase: SupabaseClient): Promise<void> {
   const { data, error } = await supabase
     .from("emotes")
-    .select("id, name, image_url, asset_type, tier, sort_order")
+    .select("id, name, image_url, asset_type, tier, sort_order, sound_url")
     .order("sort_order");
 
   if (error) {

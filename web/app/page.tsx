@@ -7,6 +7,7 @@ import { io, Socket } from "socket.io-client";
 import { supabase } from "@/lib/supabaseClient";
 import { ThemeToggle } from "@/ui/ThemeToggle";
 import { DeckToggle } from "@/ui/DeckToggle";
+import { VolumeSlider } from "@/ui/VolumeSlider";
 import { InboxPanel } from "@/ui/InboxPanel";
 import type { Notification } from "@/ui/InboxPanel";
 import { useIsMobile } from "@/lib/useIsMobile";
@@ -621,6 +622,10 @@ function AccountCard({
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ fontSize: 12, color: "var(--text2)" }}>4-colour deck</span>
           <DeckToggle />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: 12, color: "var(--text2)" }}>Sound</span>
+          <VolumeSlider />
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ fontSize: 12, color: "var(--text2)" }}>Joined</span>
@@ -2538,27 +2543,50 @@ function PageInner() {
               zIndex:     100,
               overflow:   "hidden",
             }}>
-              {[
-                { label: "Profile Settings", action: scrollToSettings },
-                { label: "Sign Out",         action: () => { signOut(); setMenuOpen(false); } },
-              ].map(({ label, action }) => (
-                <button key={label} onClick={action} style={{
-                  display:      "block",
-                  width:        "100%",
-                  background:   "transparent",
-                  border:       "none",
-                  borderBottom: label !== "Sign Out" ? "1px solid var(--border)" : "none",
-                  color:        label === "Sign Out" ? "var(--danger)" : "var(--text2)",
-                  fontSize:     12,
-                  fontFamily:   "monospace",
-                  padding:      "10px 14px",
-                  textAlign:    "left",
-                  cursor:       "pointer",
-                  letterSpacing: 0.3,
-                }}>
-                  {label}
-                </button>
-              ))}
+              <button onClick={scrollToSettings} style={{
+                display:      "block",
+                width:        "100%",
+                background:   "transparent",
+                border:       "none",
+                borderBottom: "1px solid var(--border)",
+                color:        "var(--text2)",
+                fontSize:     12,
+                fontFamily:   "monospace",
+                padding:      "10px 14px",
+                textAlign:    "left",
+                cursor:       "pointer",
+                letterSpacing: 0.3,
+              }}>
+                Profile Settings
+              </button>
+              <div style={{
+                display:      "flex",
+                alignItems:   "center",
+                justifyContent: "space-between",
+                padding:      "8px 14px",
+                borderBottom: "1px solid var(--border)",
+                fontSize:     12,
+                fontFamily:   "monospace",
+                color:        "var(--text2)",
+              }}>
+                <span>Sound</span>
+                <VolumeSlider />
+              </div>
+              <button onClick={() => { signOut(); setMenuOpen(false); }} style={{
+                display:      "block",
+                width:        "100%",
+                background:   "transparent",
+                border:       "none",
+                color:        "var(--danger)",
+                fontSize:     12,
+                fontFamily:   "monospace",
+                padding:      "10px 14px",
+                textAlign:    "left",
+                cursor:       "pointer",
+                letterSpacing: 0.3,
+              }}>
+                Sign Out
+              </button>
             </div>
           )}
         </div>

@@ -1,6 +1,6 @@
 /** Discriminated union — V1 only uses "static", but "sprite" is ready for future use. */
 export type EmoteDefinition =
-  | { id: string; name: string; assetType: "static"; imageUrl: string }
+  | { id: string; name: string; assetType: "static"; imageUrl: string; soundUrl: string | null }
   | {
       id: string;
       name: string;
@@ -12,6 +12,7 @@ export type EmoteDefinition =
       rows: number;
       frameCount: number;
       fps: number;
+      soundUrl: string | null;
     };
 
 /** Extract the display image URL regardless of asset type. */
@@ -25,11 +26,13 @@ export function rowToEmoteDefinition(row: {
   name: string;
   image_url: string;
   asset_type: string;
+  sound_url?: string | null;
 }): EmoteDefinition {
   return {
     id: row.id,
     name: row.name,
     assetType: "static",
     imageUrl: row.image_url,
+    soundUrl: row.sound_url ?? null,
   };
 }

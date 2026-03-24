@@ -101,7 +101,7 @@ const queueTimers     = new Map<string, ReturnType<typeof setTimeout>>(); // use
 
 // emotes
 const emoteCooldowns = new Map<string, number>(); // "matchId:userId" → last emote timestamp
-const EMOTE_COOLDOWN_MS = 3_000;
+const EMOTE_COOLDOWN_MS = 7_000;
 
 // challenges
 interface PendingChallenge {
