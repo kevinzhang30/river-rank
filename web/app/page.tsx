@@ -1822,8 +1822,18 @@ function PageInner() {
   const [totalPlayers, setTotalPlayers] = useState<{ global: number | null; national: number | null }>({ global: null, national: null });
 
   const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef     = useRef<HTMLDivElement>(null);
-  const settingsRef = useRef<HTMLDivElement>(null);
+  const [navOpen, setNavOpen]   = useState(false);
+  const menuRef        = useRef<HTMLDivElement>(null);
+  const navRef         = useRef<HTMLDivElement>(null);
+  const settingsRef    = useRef<HTMLDivElement>(null);
+  const profileRef     = useRef<HTMLDivElement>(null);
+  const playRef        = useRef<HTMLDivElement>(null);
+  const bulletRef      = useRef<HTMLDivElement>(null);
+  const tournamentRef  = useRef<HTMLDivElement>(null);
+  const emotesRef      = useRef<HTMLDivElement>(null);
+  const leaderboardRef = useRef<HTMLDivElement>(null);
+  const friendsRef     = useRef<HTMLDivElement>(null);
+  const matchesRef     = useRef<HTMLDivElement>(null);
 
   // Friends state
   const [friends, setFriends]                   = useState<Friend[]>([]);
@@ -2061,6 +2071,17 @@ function PageInner() {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
   }
 
+  async function handleNotificationClick(n: Notification) {
+    if (!n.read) {
+      supabase.rpc("mark_notification_read", { p_id: n.id });
+      setNotifications((prev) => prev.map((x) => x.id === n.id ? { ...x, read: true } : x));
+    }
+    if (n.type === "challenge_received") {
+      setInboxOpen(false);
+      friendsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
+
   // Dashboard socket for challenges & online status
   useEffect(() => {
     if (!session || !profile?.username) return;
@@ -2170,6 +2191,17 @@ function PageInner() {
     function handleClickOutside(e: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Click-outside to close nav menu
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (navRef.current && !navRef.current.contains(e.target as Node)) {
+        setNavOpen(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -2304,6 +2336,23 @@ function PageInner() {
     setMenuOpen(false);
   }
 
+  const NAV_ITEMS: { label: string; ref: React.RefObject<HTMLDivElement | null> }[] = [
+    { label: "Profile",        ref: profileRef },
+    { label: "Play",           ref: playRef },
+    { label: "Bullet",         ref: bulletRef },
+    { label: "Tournament",     ref: tournamentRef },
+    { label: "Emotes",         ref: emotesRef },
+    { label: "Settings",       ref: settingsRef },
+    { label: "Leaderboard",    ref: leaderboardRef },
+    { label: "Friends",        ref: friendsRef },
+    { label: "Recent Matches", ref: matchesRef },
+  ];
+
+  function scrollToSection(ref: React.RefObject<HTMLDivElement | null>) {
+    ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setNavOpen(false);
+  }
+
   if (!authChecked) return null;
 
   if (!session) {
@@ -2361,11 +2410,68 @@ function PageInner() {
           zIndex:         10,
         }}
       >
-        <span className="wordmark" style={{ fontWeight: 800, fontSize: 13 }}>RiverRank.io ♠</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {isMobile && (
+            <div ref={navRef} style={{ position: "relative" }}>
+              <button
+                onClick={() => { setNavOpen((o) => !o); setMenuOpen(false); setInboxOpen(false); }}
+                style={{
+                  background:   "transparent",
+                  border:       "none",
+                  cursor:       "pointer",
+                  color:        "var(--text3)",
+                  fontSize:     16,
+                  fontFamily:   "monospace",
+                  padding:      "4px 6px",
+                  borderRadius: 4,
+                }}
+              >
+                ☰
+              </button>
+              {navOpen && (
+                <div style={{
+                  position:     "absolute",
+                  top:          "calc(100% + 6px)",
+                  left:         0,
+                  background:   "var(--surface)",
+                  border:       "1px solid var(--border)",
+                  borderRadius: 6,
+                  minWidth:     180,
+                  zIndex:       100,
+                  overflow:     "hidden",
+                }}>
+                  {NAV_ITEMS.map(({ label, ref }, i) => (
+                    <button
+                      key={label}
+                      onClick={() => scrollToSection(ref)}
+                      style={{
+                        display:       "block",
+                        width:         "100%",
+                        background:    "transparent",
+                        border:        "none",
+                        borderBottom:  i < NAV_ITEMS.length - 1 ? "1px solid var(--border)" : "none",
+                        color:         "var(--text2)",
+                        fontSize:      12,
+                        fontFamily:    "monospace",
+                        padding:       "10px 14px",
+                        textAlign:     "left",
+                        cursor:        "pointer",
+                        letterSpacing: 0.3,
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          <span className="wordmark" style={{ fontWeight: 800, fontSize: 13 }}>RiverRank.io ♠</span>
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {/* Inbox toggle */}
           <button
-            onClick={() => setInboxOpen((o) => !o)}
+            onClick={() => { setInboxOpen((o) => !o); setNavOpen(false); }}
             style={{
               background:   "transparent",
               border:       "none",
@@ -2403,7 +2509,7 @@ function PageInner() {
           {/* User menu */}
           <div ref={menuRef} style={{ position: "relative" }}>
           <button
-            onClick={() => setMenuOpen(o => !o)}
+            onClick={() => { setMenuOpen(o => !o); setNavOpen(false); }}
             style={{
               background:  "transparent",
               border:      "none",
@@ -2464,6 +2570,7 @@ function PageInner() {
         onClose={() => setInboxOpen(false)}
         notifications={notifications}
         onMarkAllRead={handleMarkAllRead}
+        onClickNotification={handleNotificationClick}
       />
 
       {/* Main content */}
@@ -2485,15 +2592,25 @@ function PageInner() {
         >
           {/* Left column */}
           <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-            {profile && <ProfileCard profile={profile} />}
-            <PlayCard onPlay={(mode) => router.push(`/game?mode=${mode}`)} />
-            <BulletPlayCard onPlay={(mode) => router.push(`/game?mode=${mode}`)} />
-            <TournamentCard
-              dashboardSocket={dashboardSocketRef.current}
-              onNavigate={(path) => router.push(path)}
-            />
-            {session?.user?.id && <EmoteLoadoutCard userId={session.user.id} />}
-            <div ref={settingsRef}>
+            <div ref={profileRef} style={{ scrollMarginTop: 56 }}>
+              {profile && <ProfileCard profile={profile} />}
+            </div>
+            <div ref={playRef} style={{ scrollMarginTop: 56 }}>
+              <PlayCard onPlay={(mode) => router.push(`/game?mode=${mode}`)} />
+            </div>
+            <div ref={bulletRef} style={{ scrollMarginTop: 56 }}>
+              <BulletPlayCard onPlay={(mode) => router.push(`/game?mode=${mode}`)} />
+            </div>
+            <div ref={tournamentRef} style={{ scrollMarginTop: 56 }}>
+              <TournamentCard
+                dashboardSocket={dashboardSocketRef.current}
+                onNavigate={(path) => router.push(path)}
+              />
+            </div>
+            <div ref={emotesRef} style={{ scrollMarginTop: 56 }}>
+              {session?.user?.id && <EmoteLoadoutCard userId={session.user.id} />}
+            </div>
+            <div ref={settingsRef} style={{ scrollMarginTop: 56 }}>
               <AccountCard
                 onSignOut={signOut}
                 currentUsername={profile?.username ?? null}
@@ -2505,29 +2622,35 @@ function PageInner() {
 
           {/* Right column */}
           <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-            <LeaderboardCard
-              entries={leaderboard}
-              scope={leaderboardScope}
-              onScopeChange={setLeaderboardScope}
-              userRank={userRank}
-              userCountry={profile?.country}
-              totalPlayers={totalPlayers}
-            />
-            <FriendsCard
-              friends={sortedFriends}
-              friendCode={friendCode}
-              onChallenge={handleChallenge}
-              pendingChallenge={pendingChallenge}
-              onAcceptChallenge={handleAcceptChallenge}
-              onDeclineChallenge={handleDeclineChallenge}
-              onCancelChallenge={handleCancelChallenge}
-              challengeWaiting={challengeWaiting}
-              onlineFriends={onlineFriends}
-              friendsSort={friendsSort}
-              onSortChange={setFriendsSort}
-              h2hRecords={h2hRecords}
-            />
-            <RecentMatchesCard matches={recentMatches} />
+            <div ref={leaderboardRef} style={{ scrollMarginTop: 56 }}>
+              <LeaderboardCard
+                entries={leaderboard}
+                scope={leaderboardScope}
+                onScopeChange={setLeaderboardScope}
+                userRank={userRank}
+                userCountry={profile?.country}
+                totalPlayers={totalPlayers}
+              />
+            </div>
+            <div ref={friendsRef} style={{ scrollMarginTop: 56 }}>
+              <FriendsCard
+                friends={sortedFriends}
+                friendCode={friendCode}
+                onChallenge={handleChallenge}
+                pendingChallenge={pendingChallenge}
+                onAcceptChallenge={handleAcceptChallenge}
+                onDeclineChallenge={handleDeclineChallenge}
+                onCancelChallenge={handleCancelChallenge}
+                challengeWaiting={challengeWaiting}
+                onlineFriends={onlineFriends}
+                friendsSort={friendsSort}
+                onSortChange={setFriendsSort}
+                h2hRecords={h2hRecords}
+              />
+            </div>
+            <div ref={matchesRef} style={{ scrollMarginTop: 56 }}>
+              <RecentMatchesCard matches={recentMatches} />
+            </div>
           </div>
         </div>
 
