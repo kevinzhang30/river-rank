@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import type { EmoteDefinition } from "@/lib/emotes";
 import { getEmoteImageUrl } from "@/lib/emotes";
+import { EmoteFrame } from "./EmoteFrame";
 
 interface Props {
   equippedEmotes: EmoteDefinition[];
@@ -71,33 +72,33 @@ export function EmotePicker({ equippedEmotes, onSelect, onClose, cooldownActive 
           title={emote.name}
           style={{
             background: "transparent",
-            border: "1px solid transparent",
+            border: "none",
             borderRadius: 6,
-            padding: 4,
+            padding: 0,
             cursor: "pointer",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            transition: "border-color 0.1s, background 0.1s",
+            transition: "transform 0.1s ease",
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = "var(--primaryBtn)";
-            e.currentTarget.style.background = "rgba(59, 91, 219, 0.12)";
+            e.currentTarget.style.transform = "translateY(-1px)";
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = "transparent";
-            e.currentTarget.style.background = "transparent";
+            e.currentTarget.style.transform = "translateY(0)";
           }}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={getEmoteImageUrl(emote)}
-            alt={emote.name}
-            width={48}
-            height={48}
-            style={{ borderRadius: 4 }}
-            draggable={false}
-          />
+          <EmoteFrame tier={emote.tier} radius={6} style={{ width: 60, height: 60 }} contentPadding={4}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={getEmoteImageUrl(emote)}
+              alt={emote.name}
+              width={48}
+              height={48}
+              style={{ borderRadius: 4 }}
+              draggable={false}
+            />
+          </EmoteFrame>
         </button>
       ))}
     </div>

@@ -16,6 +16,7 @@ import {
 import type { PublicGameState, PublicPlayer, Mode, EmoteEvent } from "@/ui/types";
 import type { EmoteDefinition } from "@/lib/emotes";
 import { rowToEmoteDefinition } from "@/lib/emotes";
+import { unlockAudio, play, preloadSound } from "@/lib/sound";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4000";
 
@@ -69,6 +70,32 @@ function GameView() {
   const [activeEmotes, setActiveEmotes] = useState<EmoteEvent[]>([]);
   const [equippedEmotes, setEquippedEmotes] = useState<EmoteDefinition[]>([]);
   const [emoteRegistry, setEmoteRegistry] = useState<Record<string, EmoteDefinition>>({});
+
+  // Ref to access latest emoteRegistry inside socket handler closure
+  const emoteRegistryRef = useRef<Record<string, EmoteDefinition>>({});
+  useEffect(() => { emoteRegistryRef.current = emoteRegistry; }, [emoteRegistry]);
+
+  // Unlock audio on first user gesture
+  useEffect(() => {
+    const handler = () => {
+      unlockAudio();
+      window.removeEventListener("click", handler);
+      window.removeEventListener("keydown", handler);
+    };
+    window.addEventListener("click", handler);
+    window.addEventListener("keydown", handler);
+    return () => {
+      window.removeEventListener("click", handler);
+      window.removeEventListener("keydown", handler);
+    };
+  }, []);
+
+  // Preload emote sounds when registry loads
+  useEffect(() => {
+    for (const def of Object.values(emoteRegistry)) {
+      if (def.soundUrl) preloadSound(def.soundUrl);
+    }
+  }, [emoteRegistry]);
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
@@ -183,6 +210,9 @@ function GameView() {
         console.log("[emote.event] received:", { actorUserId, emoteId, createdAt });
         const id = `${actorUserId}-${createdAt}`;
         setActiveEmotes((prev) => [...prev, { id, actorUserId, emoteId, createdAt }]);
+        // Play emote sound if available
+        const def = emoteRegistryRef.current[emoteId];
+        if (def?.soundUrl) play(def.soundUrl);
       });
 
       socket.on("player.disconnected", () => {
@@ -216,7 +246,7 @@ function GameView() {
       // Fetch all emotes for the registry
       const { data: allEmotes } = await supabase
         .from("emotes")
-        .select("id, name, image_url, asset_type")
+        .select("id, name, image_url, asset_type, sound_url, tier")
         .order("sort_order");
       const reg: Record<string, EmoteDefinition> = {};
       for (const row of allEmotes ?? []) {
@@ -227,7 +257,7 @@ function GameView() {
       // Fetch equipped emotes (joined with emotes table)
       const { data: equipped } = await supabase
         .from("equipped_emotes")
-        .select("slot, emote_id, emotes(id, name, image_url, asset_type)")
+        .select("slot, emote_id, emotes(id, name, image_url, asset_type, sound_url, tier)")
         .eq("user_id", userId)
         .order("slot");
 

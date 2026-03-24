@@ -7,6 +7,7 @@ import { io, Socket } from "socket.io-client";
 import { supabase } from "@/lib/supabaseClient";
 import { ThemeToggle } from "@/ui/ThemeToggle";
 import { DeckToggle } from "@/ui/DeckToggle";
+import { VolumeSlider } from "@/ui/VolumeSlider";
 import { InboxPanel } from "@/ui/InboxPanel";
 import type { Notification } from "@/ui/InboxPanel";
 import { useIsMobile } from "@/lib/useIsMobile";
@@ -14,6 +15,8 @@ import type { LeaderboardEntry, Mode } from "@/ui/types";
 import type { EmoteDefinition } from "@/lib/emotes";
 import { rowToEmoteDefinition, getEmoteImageUrl } from "@/lib/emotes";
 import { COUNTRIES, COUNTRY_MAP } from "@/lib/countries";
+import { getSoundDuration, play, preloadSound, unlockAudio } from "@/lib/sound";
+import { EmoteFrame } from "@/ui/EmoteFrame";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4000";
 
@@ -623,6 +626,10 @@ function AccountCard({
           <DeckToggle />
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: 12, color: "var(--text2)" }}>Sound</span>
+          <VolumeSlider />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ fontSize: 12, color: "var(--text2)" }}>Joined</span>
           <span style={{ fontSize: 12, color: "var(--text3)", fontFamily: "monospace" }}>
             {joinedAt ? new Date(joinedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
@@ -663,21 +670,26 @@ function AccountCard({
 // ── Emote loadout card ───────────────────────────────────────────────────────
 
 function EmoteLoadoutCard({ userId }: { userId: string }) {
-  const [allEmotes, setAllEmotes]         = useState<(EmoteDefinition & { tier: string })[]>([]);
+  const [allEmotes, setAllEmotes]         = useState<EmoteDefinition[]>([]);
   const [ownedIds, setOwnedIds]           = useState<Set<string>>(new Set());
   const [equipped, setEquipped]           = useState<(EmoteDefinition | null)[]>([null, null, null, null]);
   const [pickingSlot, setPickingSlot]     = useState<number | null>(null);
+  const [previewingEmoteId, setPreviewingEmoteId] = useState<string | null>(null);
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     (async () => {
       const [{ data: emotes }, { data: owned }, { data: eq }] = await Promise.all([
-        supabase.from("emotes").select("id, name, image_url, asset_type, tier").order("sort_order"),
+        supabase.from("emotes").select("id, name, image_url, asset_type, sound_url, tier").order("sort_order"),
         supabase.from("user_emotes").select("emote_id").eq("user_id", userId),
-        supabase.from("equipped_emotes").select("slot, emote_id, emotes(id, name, image_url, asset_type)").eq("user_id", userId).order("slot"),
+        supabase.from("equipped_emotes").select("slot, emote_id, emotes(id, name, image_url, asset_type, sound_url, tier)").eq("user_id", userId).order("slot"),
       ]);
 
-      const defs = (emotes ?? []).map((r: any) => ({ ...rowToEmoteDefinition(r), tier: r.tier }));
-      setAllEmotes(defs as any);
+      const defs = (emotes ?? []).map((r: any) => rowToEmoteDefinition(r));
+      for (const def of defs) {
+        if (def.soundUrl) void preloadSound(def.soundUrl);
+      }
+      setAllEmotes(defs);
       setOwnedIds(new Set((owned ?? []).map((r: any) => r.emote_id)));
 
       const slots: (EmoteDefinition | null)[] = [null, null, null, null];
@@ -690,6 +702,12 @@ function EmoteLoadoutCard({ userId }: { userId: string }) {
       setEquipped(slots);
     })();
   }, [userId]);
+
+  useEffect(() => {
+    return () => {
+      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+    };
+  }, []);
 
   async function equipEmote(slot: number, emote: EmoteDefinition) {
     // Remove if already in another slot
@@ -721,6 +739,19 @@ function EmoteLoadoutCard({ userId }: { userId: string }) {
     });
   }
 
+  function previewEmote(emote: EmoteDefinition, owned: boolean) {
+    if (!owned || !emote.soundUrl) return;
+    unlockAudio();
+    play(emote.soundUrl);
+    setPreviewingEmoteId(emote.id);
+    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+    const durationMs = Math.min(5000, Math.max(1400, getSoundDuration(emote.soundUrl) ?? 1800));
+    previewTimerRef.current = setTimeout(() => {
+      setPreviewingEmoteId((current) => (current === emote.id ? null : current));
+      previewTimerRef.current = null;
+    }, durationMs);
+  }
+
   return (
     <Card>
       <CardLabel>Emotes</CardLabel>
@@ -732,11 +763,8 @@ function EmoteLoadoutCard({ userId }: { userId: string }) {
             style={{
               width: 56,
               height: 56,
-              borderRadius: 8,
-              border: pickingSlot === slot
-                ? "2px solid var(--primaryBtn)"
-                : "1px solid var(--border)",
-              background: "var(--surface2)",
+              background: "none",
+              border: "none",
               cursor: "pointer",
               display: "flex",
               alignItems: "center",
@@ -746,19 +774,70 @@ function EmoteLoadoutCard({ userId }: { userId: string }) {
             }}
             title={emote ? emote.name : `Slot ${slot + 1} (empty)`}
           >
-            {emote ? (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img
-                src={getEmoteImageUrl(emote)}
-                alt={emote.name}
-                width={44}
-                height={44}
-                style={{ borderRadius: 4 }}
-                draggable={false}
-              />
-            ) : (
-              <span style={{ fontSize: 20, color: "var(--text3)" }}>+</span>
-            )}
+            <div
+              style={{
+                width: 56,
+                height: 56,
+                position: "relative",
+                transform: emote?.id === previewingEmoteId ? "scale(1.06)" : "scale(1)",
+                transition: "transform 0.16s ease",
+              }}
+            >
+              {emote?.id === previewingEmoteId && (
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: -6,
+                    borderRadius: 12,
+                    background: "radial-gradient(circle, rgba(59, 91, 219, 0.28), rgba(59, 91, 219, 0.06) 58%, transparent 72%)",
+                    animation: "emote-preview-pulse 1s ease-in-out infinite",
+                    pointerEvents: "none",
+                  }}
+                />
+              )}
+              <EmoteFrame
+                tier={emote?.tier}
+                selected={pickingSlot === slot}
+                radius={8}
+                style={{ width: 56, height: 56, position: "relative", zIndex: 1 }}
+              >
+                {emote ? (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img
+                    src={getEmoteImageUrl(emote)}
+                    alt={emote.name}
+                    width={44}
+                    height={44}
+                    style={{ borderRadius: 4 }}
+                    draggable={false}
+                  />
+                ) : (
+                  <span style={{ fontSize: 20, color: "var(--text3)" }}>+</span>
+                )}
+              </EmoteFrame>
+              {emote?.id === previewingEmoteId && (
+                <div
+                  style={{
+                    position: "absolute",
+                    right: -4,
+                    top: -6,
+                    zIndex: 2,
+                    background: "var(--primaryBtn)",
+                    color: "var(--primaryBtnText)",
+                    borderRadius: 999,
+                    padding: "2px 6px",
+                    fontSize: 8,
+                    fontWeight: 800,
+                    letterSpacing: 0.8,
+                    textTransform: "uppercase",
+                    boxShadow: "0 4px 12px rgba(59, 91, 219, 0.35)",
+                    pointerEvents: "none",
+                  }}
+                >
+                  Preview
+                </div>
+              )}
+            </div>
           </button>
         ))}
       </div>
@@ -820,16 +899,17 @@ function EmoteLoadoutCard({ userId }: { userId: string }) {
               return (
                 <button
                   key={emote.id}
-                  onClick={() => owned && equipEmote(pickingSlot, emote)}
+                  onClick={() => {
+                    if (!owned) return;
+                    previewEmote(emote, owned);
+                    equipEmote(pickingSlot, emote);
+                  }}
                   disabled={!owned}
                   style={{
                     width: "100%",
                     aspectRatio: "1",
-                    borderRadius: 6,
-                    border: isEquipped
-                      ? "2px solid var(--primaryBtn)"
-                      : "1px solid var(--border)",
-                    background: "var(--surface2)",
+                    background: "none",
+                    border: "none",
                     cursor: owned ? "pointer" : "not-allowed",
                     opacity: owned ? 1 : 0.35,
                     display: "flex",
@@ -840,25 +920,57 @@ function EmoteLoadoutCard({ userId }: { userId: string }) {
                   }}
                   title={owned ? emote.name : `${emote.name} (locked)`}
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={getEmoteImageUrl(emote)}
-                    alt={emote.name}
-                    style={{ width: "100%", height: "100%", objectFit: "contain", borderRadius: 4 }}
-                    draggable={false}
-                  />
-                  {!owned && (
-                    <span
-                      style={{
-                        position: "absolute",
-                        bottom: 2,
-                        right: 2,
-                        fontSize: 10,
-                      }}
-                    >
-                      🔒
-                    </span>
-                  )}
+                  <EmoteFrame
+                    tier={emote.tier}
+                    selected={isEquipped}
+                    radius={6}
+                    style={{ width: "100%", height: "100%" }}
+                    contentPadding={4}
+                  >
+                    <>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={getEmoteImageUrl(emote)}
+                        alt={emote.name}
+                        style={{ width: "100%", height: "100%", objectFit: "contain", borderRadius: 4 }}
+                        draggable={false}
+                      />
+                      {isEquipped && (
+                        <div
+                          style={{
+                            position: "absolute",
+                            right: 4,
+                            top: 4,
+                            zIndex: 2,
+                            background: "var(--primaryBtn)",
+                            color: "var(--primaryBtnText)",
+                            borderRadius: 999,
+                            padding: "2px 6px",
+                            fontSize: 8,
+                            fontWeight: 800,
+                            letterSpacing: 0.8,
+                            textTransform: "uppercase",
+                            boxShadow: "0 4px 12px rgba(59, 91, 219, 0.35)",
+                            pointerEvents: "none",
+                          }}
+                        >
+                          Selected
+                        </div>
+                      )}
+                      {!owned && (
+                        <span
+                          style={{
+                            position: "absolute",
+                            bottom: 2,
+                            right: 2,
+                            fontSize: 10,
+                          }}
+                        >
+                          🔒
+                        </span>
+                      )}
+                    </>
+                  </EmoteFrame>
                 </button>
               );
             })}
@@ -2538,27 +2650,50 @@ function PageInner() {
               zIndex:     100,
               overflow:   "hidden",
             }}>
-              {[
-                { label: "Profile Settings", action: scrollToSettings },
-                { label: "Sign Out",         action: () => { signOut(); setMenuOpen(false); } },
-              ].map(({ label, action }) => (
-                <button key={label} onClick={action} style={{
-                  display:      "block",
-                  width:        "100%",
-                  background:   "transparent",
-                  border:       "none",
-                  borderBottom: label !== "Sign Out" ? "1px solid var(--border)" : "none",
-                  color:        label === "Sign Out" ? "var(--danger)" : "var(--text2)",
-                  fontSize:     12,
-                  fontFamily:   "monospace",
-                  padding:      "10px 14px",
-                  textAlign:    "left",
-                  cursor:       "pointer",
-                  letterSpacing: 0.3,
-                }}>
-                  {label}
-                </button>
-              ))}
+              <button onClick={scrollToSettings} style={{
+                display:      "block",
+                width:        "100%",
+                background:   "transparent",
+                border:       "none",
+                borderBottom: "1px solid var(--border)",
+                color:        "var(--text2)",
+                fontSize:     12,
+                fontFamily:   "monospace",
+                padding:      "10px 14px",
+                textAlign:    "left",
+                cursor:       "pointer",
+                letterSpacing: 0.3,
+              }}>
+                Profile Settings
+              </button>
+              <div style={{
+                display:      "flex",
+                alignItems:   "center",
+                justifyContent: "space-between",
+                padding:      "8px 14px",
+                borderBottom: "1px solid var(--border)",
+                fontSize:     12,
+                fontFamily:   "monospace",
+                color:        "var(--text2)",
+              }}>
+                <span>Sound</span>
+                <VolumeSlider />
+              </div>
+              <button onClick={() => { signOut(); setMenuOpen(false); }} style={{
+                display:      "block",
+                width:        "100%",
+                background:   "transparent",
+                border:       "none",
+                color:        "var(--danger)",
+                fontSize:     12,
+                fontFamily:   "monospace",
+                padding:      "10px 14px",
+                textAlign:    "left",
+                cursor:       "pointer",
+                letterSpacing: 0.3,
+              }}>
+                Sign Out
+              </button>
             </div>
           )}
         </div>

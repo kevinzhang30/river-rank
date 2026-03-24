@@ -7,7 +7,10 @@ import { supabase } from "@/lib/supabaseClient";
 import { BracketView } from "@/ui/BracketView";
 import { PokerTable } from "@/ui/PokerTable";
 import { useIsMobile } from "@/lib/useIsMobile";
-import type { TournamentState, TournamentMatchInfo, PublicGameState } from "@/ui/types";
+import type { TournamentState, TournamentMatchInfo, PublicGameState, EmoteEvent } from "@/ui/types";
+import type { EmoteDefinition } from "@/lib/emotes";
+import { rowToEmoteDefinition } from "@/lib/emotes";
+import { unlockAudio, play, preloadSound } from "@/lib/sound";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4000";
 
@@ -34,11 +37,15 @@ export default function TournamentPage() {
   const [spectateAllInCards, setSpectateAllInCards] = useState<Record<string, [string, string]> | null>(null);
   const [spectateBestHands, setSpectateBestHands] = useState<Record<string, string> | null>(null);
   const [spectateEnded, setSpectateEnded] = useState<{ winnerId: string; winnerUsername: string } | null>(null);
+  const [activeEmotes, setActiveEmotes] = useState<EmoteEvent[]>([]);
+  const [emoteRegistry, setEmoteRegistry] = useState<Record<string, EmoteDefinition>>({});
 
   const stateRef = useRef(state);
   stateRef.current = state;
   const spectatingRef = useRef(spectating);
   spectatingRef.current = spectating;
+  const emoteRegistryRef = useRef<Record<string, EmoteDefinition>>({});
+  useEffect(() => { emoteRegistryRef.current = emoteRegistry; }, [emoteRegistry]);
 
   const fetchState = useCallback((socket: Socket, uid: string) => {
     socket.emit(
@@ -75,6 +82,28 @@ export default function TournamentPage() {
       },
     );
   }, [tournamentId]);
+
+  // Unlock audio on first user gesture
+  useEffect(() => {
+    const handler = () => {
+      unlockAudio();
+      window.removeEventListener("click", handler);
+      window.removeEventListener("keydown", handler);
+    };
+    window.addEventListener("click", handler);
+    window.addEventListener("keydown", handler);
+    return () => {
+      window.removeEventListener("click", handler);
+      window.removeEventListener("keydown", handler);
+    };
+  }, []);
+
+  // Preload emote sounds when registry loads
+  useEffect(() => {
+    for (const def of Object.values(emoteRegistry)) {
+      if (def.soundUrl) preloadSound(def.soundUrl);
+    }
+  }, [emoteRegistry]);
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
@@ -289,6 +318,13 @@ export default function TournamentPage() {
         }, 3000);
       });
 
+      socket.on("emote.event", ({ actorUserId, emoteId, createdAt }: { actorUserId: string; emoteId: string; createdAt: number }) => {
+        const id = `${actorUserId}-${createdAt}`;
+        setActiveEmotes((prev) => [...prev, { id, actorUserId, emoteId, createdAt }]);
+        const def = emoteRegistryRef.current[emoteId];
+        if (def?.soundUrl) play(def.soundUrl);
+      });
+
       socket.on("session.replaced", () => {
         setSessionReplaced(true);
       });
@@ -298,6 +334,26 @@ export default function TournamentPage() {
       socketRef.current?.disconnect();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch emote registry for spectator emote display
+  useEffect(() => {
+    if (!userId) return;
+    (async () => {
+      const { data: allEmotes } = await supabase
+        .from("emotes")
+        .select("id, name, image_url, asset_type, sound_url, tier")
+        .order("sort_order");
+      const reg: Record<string, EmoteDefinition> = {};
+      for (const row of allEmotes ?? []) {
+        reg[row.id] = rowToEmoteDefinition(row);
+      }
+      setEmoteRegistry(reg);
+    })();
+  }, [userId]);
+
+  function handleEmoteComplete(id: string) {
+    setActiveEmotes((prev) => prev.filter((e) => e.id !== id));
+  }
 
   function handleReadyUp() {
     if (!myMatchReady) return;
@@ -958,6 +1014,9 @@ export default function TournamentPage() {
                 liveOpponentCards={spectateAllInCards?.[spectateState.players[0]?.userId] ?? null}
                 heroBestHand={spectateBestHands?.[spectateState.players[1]?.userId] ?? null}
                 opponentBestHand={spectateBestHands?.[spectateState.players[0]?.userId] ?? null}
+                activeEmotes={activeEmotes}
+                onEmoteComplete={handleEmoteComplete}
+                emoteRegistry={emoteRegistry}
               />
             </div>
           </div>

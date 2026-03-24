@@ -9,20 +9,26 @@ interface Props {
   emote: EmoteDefinition;
   /** Display size in CSS pixels. Defaults: 96 desktop, 72 mobile. */
   size?: number;
+  /** Total animation duration in ms. Default 1200. Clamped to [1200, 5000]. */
+  durationMs?: number;
   onComplete: () => void;
 }
 
 /**
  * Plays a static emote image with code-driven animation:
- *   0–100ms   pop-in  scale 0.3→1.1
- *   100–200ms settle  scale 1.1→1.0
- *   200–900ms hold    scale 1.0, opacity 1
- *   900–1200ms fade   opacity 1→0
- *   1200ms    done
+ *   0–100ms              pop-in   scale 0.3→1.1
+ *   100–200ms            settle   scale 1.1→1.0
+ *   200–(duration-300)ms hold     scale 1.0, opacity 1
+ *   last 300ms           fade     opacity 1→0
+ *
+ * Default duration is 1200ms. When a sound is attached, the caller
+ * can pass a longer durationMs so the visual matches the audio.
  */
-export function EmotePlayer({ emote, size, onComplete }: Props) {
+export function EmotePlayer({ emote, size, durationMs, onComplete }: Props) {
   const isMobile = useIsMobile();
   const displaySize = size ?? (isMobile ? 72 : 96);
+  const totalMs = Math.max(1200, Math.min(5000, durationMs ?? 1200));
+  const fadeStart = totalMs - 300;
   const rafRef = useRef<number>(0);
   const startRef = useRef<number>(0);
   const [style, setStyle] = useState<React.CSSProperties>({
@@ -55,9 +61,9 @@ export function EmotePlayer({ emote, size, onComplete }: Props) {
         scale = 1.0;
       }
 
-      if (elapsed > 900) {
+      if (elapsed > fadeStart) {
         // Fade out over last 300ms
-        const t = Math.min(1, (elapsed - 900) / 300);
+        const t = Math.min(1, (elapsed - fadeStart) / 300);
         opacity = 1 - t;
       } else {
         opacity = 1;
@@ -65,7 +71,7 @@ export function EmotePlayer({ emote, size, onComplete }: Props) {
 
       setStyle({ transform: `scale(${scale})`, opacity });
 
-      if (elapsed >= 1200) {
+      if (elapsed >= totalMs) {
         if (!completedRef.current) {
           completedRef.current = true;
           onCompleteRef.current();

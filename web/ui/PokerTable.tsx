@@ -13,6 +13,7 @@ import { HandCheatSheet } from "./HandCheatSheet";
 import { EmoteBubble } from "./EmoteOverlay";
 import { EmotePicker } from "./EmotePicker";
 import { useIsMobile } from "@/lib/useIsMobile";
+import { playSynth, SFX } from "@/lib/sound";
 
 const STREET_LABEL: Record<string, string> = {
   preflop:  "PREFLOP",
@@ -103,6 +104,17 @@ export function PokerTable({
     return () => { if (handResultTimerRef.current) clearTimeout(handResultTimerRef.current); };
   }, [state.handResult?.handId]);
 
+  // ── Hand result sound (win/lose) ───────────────────────────────────────────
+  useEffect(() => {
+    if (spectatorMode || !state.handResult) return;
+    if (state.handResult.winnerUserId === null) return; // split — no sound
+    if (state.handResult.winnerUserId === heroUserId) {
+      playSynth(SFX.HAND_WIN);
+    } else {
+      playSynth(SFX.HAND_LOSE);
+    }
+  }, [state.handResult?.handId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Reset pick-card mode when hand changes
   useEffect(() => {
     setPickingCard(false);
@@ -128,6 +140,29 @@ export function PokerTable({
 
   const hero     = state.players.find((p) => p.userId === heroUserId) ?? state.players[1];
   const opponent = state.players.find((p) => p.userId !== heroUserId) ?? state.players[0];
+
+  // ── Turn-start sound cue (hero only, not spectator) ────────────────────────
+  const prevIsToActRef = useRef(false);
+  useEffect(() => {
+    if (!spectatorMode && hero.isToAct && !prevIsToActRef.current) {
+      playSynth(SFX.TURN_CUE);
+    }
+    prevIsToActRef.current = hero.isToAct;
+  }, [hero.isToAct, spectatorMode]);
+
+  // ── Timer warning ticks at 3, 2, 1 (hero only, not spectator) ─────────────
+  const lastTickedSecondRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (spectatorMode || !hero.isToAct || !state.turnDeadlineMs || state.turnDeadlineMs <= 0 || activeHandResult) {
+      lastTickedSecondRef.current = null;
+      return;
+    }
+    const secondsLeft = Math.max(0, Math.ceil((state.turnDeadlineMs - Date.now()) / 1000));
+    if (secondsLeft <= 3 && secondsLeft >= 1 && lastTickedSecondRef.current !== secondsLeft) {
+      lastTickedSecondRef.current = secondsLeft;
+      playSynth(SFX.TIMER_TICK);
+    }
+  }); // Runs every render (driven by the 250ms tick interval)
 
   // Derive per-player showdown / reveal data
   const opponentRevealedCards: string[] | null =
@@ -593,7 +628,7 @@ export function PokerTable({
                       onSelect={(emoteId) => {
                         onSendEmote(emoteId);
                         setShowEmotePicker(false);
-                        setEmoteCooldownUntil(Date.now() + 3000);
+                        setEmoteCooldownUntil(Date.now() + 7000);
                       }}
                       onClose={() => setShowEmotePicker(false)}
                       cooldownActive={Date.now() < emoteCooldownUntil}
