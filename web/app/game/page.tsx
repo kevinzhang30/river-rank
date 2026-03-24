@@ -246,7 +246,7 @@ function GameView() {
       // Fetch all emotes for the registry
       const { data: allEmotes } = await supabase
         .from("emotes")
-        .select("id, name, image_url, asset_type, sound_url")
+        .select("id, name, image_url, asset_type, sound_url, tier")
         .order("sort_order");
       const reg: Record<string, EmoteDefinition> = {};
       for (const row of allEmotes ?? []) {
@@ -257,7 +257,7 @@ function GameView() {
       // Fetch equipped emotes (joined with emotes table)
       const { data: equipped } = await supabase
         .from("equipped_emotes")
-        .select("slot, emote_id, emotes(id, name, image_url, asset_type, sound_url)")
+        .select("slot, emote_id, emotes(id, name, image_url, asset_type, sound_url, tier)")
         .eq("user_id", userId)
         .order("slot");
 

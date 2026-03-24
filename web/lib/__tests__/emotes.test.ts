@@ -8,11 +8,14 @@ describe("rowToEmoteDefinition", () => {
       name: "Mewing",
       image_url: "/emotes/mewing-emote.png",
       asset_type: "static",
+      tier: "premium",
       sound_url: "/sfx/emotes/mewing.mp3",
     });
     expect(def.id).toBe("mewing");
+    expect(def.tier).toBe("premium");
     expect(def.soundUrl).toBe("/sfx/emotes/mewing.mp3");
     expect(def.assetType).toBe("static");
+    if (def.assetType !== "static") throw new Error("expected static emote");
     expect(def.imageUrl).toBe("/emotes/mewing-emote.png");
   });
 
@@ -34,6 +37,7 @@ describe("rowToEmoteDefinition", () => {
       image_url: "/emotes/thanks-emote.png",
       asset_type: "static",
     });
+    expect(def.tier).toBe("free");
     expect(def.soundUrl).toBeNull();
   });
 
