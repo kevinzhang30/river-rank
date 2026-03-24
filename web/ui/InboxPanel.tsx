@@ -43,13 +43,14 @@ function renderNotification(n: Notification): { icon: string; text: string } {
 }
 
 interface Props {
-  open:          boolean;
-  onClose:       () => void;
-  notifications: Notification[];
-  onMarkAllRead: () => void;
+  open:                 boolean;
+  onClose:              () => void;
+  notifications:        Notification[];
+  onMarkAllRead:        () => void;
+  onClickNotification:  (n: Notification) => void;
 }
 
-export function InboxPanel({ open, onClose, notifications, onMarkAllRead }: Props) {
+export function InboxPanel({ open, onClose, notifications, onMarkAllRead, onClickNotification }: Props) {
   const isMobile = useIsMobile();
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -165,6 +166,7 @@ export function InboxPanel({ open, onClose, notifications, onMarkAllRead }: Prop
           return (
             <div
               key={n.id}
+              onClick={() => onClickNotification(n)}
               style={{
                 padding:      "10px 16px",
                 borderBottom: "1px solid var(--border)",
@@ -172,6 +174,7 @@ export function InboxPanel({ open, onClose, notifications, onMarkAllRead }: Prop
                 display:      "flex",
                 gap:          10,
                 alignItems:   "flex-start",
+                cursor:       "pointer",
               }}
             >
               <span
