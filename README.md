@@ -87,4 +87,4 @@ Active development. Designed as a long-term platform project. Version 1 release 
 - Mobile App support
 - Increase User count
 - Paid cosmetics and battle pass subscription paywall for advanced features
-- Sound
+- ~~Sound~~
