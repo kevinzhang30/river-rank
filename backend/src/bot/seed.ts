@@ -610,10 +610,17 @@ async function seed(): Promise<void> {
     .select("id")
     .eq("enabled", true);
 
+  // Fetch elite bot IDs so we don't disable them
+  const { data: eliteBots } = await supabaseAdmin
+    .from("bot_config")
+    .select("id")
+    .eq("is_elite", true);
+  const eliteIds = new Set((eliteBots ?? []).map((r: any) => r.id as string));
+
   if (allBotConfigs) {
     const staleIds = allBotConfigs
       .map((row) => row.id as string)
-      .filter((id) => !seededUserIds.has(id));
+      .filter((id) => !seededUserIds.has(id) && !eliteIds.has(id));
 
     if (staleIds.length > 0) {
       const { error: disableError } = await supabaseAdmin
