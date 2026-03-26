@@ -381,6 +381,8 @@ function emitGameState(state: InternalGameState): void {
         heroStack: hero.stack,
         villainStack: opponent.stack,
         wasLastAggressor: lastAgg,
+        selfBetThisStreet: hero.betThisStreet,
+        selfIsInPosition: botId === state.dealerId,
       };
 
       const { action, amount } = decideBotAction(ctx, botProfile);

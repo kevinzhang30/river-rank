@@ -17,6 +17,13 @@ export interface BotProfile {
   aggression: number;
   bluffFrequency: number;
   looseness: number;
+  // Elite bot fields (optional — undefined for regular bots)
+  isElite?: boolean;
+  threeBetFreq?: number;
+  blindDefenseBonus?: number;
+  shortStackAggression?: number;
+  trapFrequency?: number;
+  doubleBarrelFreq?: number;
 }
 
 // ── In-memory registry ──────────────────────────────────────────────────────
@@ -41,7 +48,7 @@ export async function loadBotRegistry(): Promise<void> {
 
   const { data: configs, error: configsError } = await supabaseAdmin
     .from("bot_config")
-    .select("*");
+    .select("id, style, aggression, bluff_frequency, looseness, enabled, ranked_enabled, unranked_enabled, last_used_at, is_elite, three_bet_freq, blind_defense_bonus, short_stack_aggression, trap_frequency, double_barrel_freq");
 
   if (configsError) throw configsError;
 
@@ -68,6 +75,12 @@ export async function loadBotRegistry(): Promise<void> {
       aggression: cfg?.aggression ?? 0.5,
       bluffFrequency: cfg?.bluff_frequency ?? 0.1,
       looseness: cfg?.looseness ?? 0.5,
+      isElite: cfg?.is_elite ?? false,
+      threeBetFreq: cfg?.three_bet_freq ?? undefined,
+      blindDefenseBonus: cfg?.blind_defense_bonus ?? undefined,
+      shortStackAggression: cfg?.short_stack_aggression ?? undefined,
+      trapFrequency: cfg?.trap_frequency ?? undefined,
+      doubleBarrelFreq: cfg?.double_barrel_freq ?? undefined,
     });
   }
 

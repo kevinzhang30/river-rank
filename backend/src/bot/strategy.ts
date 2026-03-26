@@ -143,6 +143,8 @@ export interface BotGameContext {
   heroStack: number;
   villainStack: number;
   wasLastAggressor: boolean;
+  selfBetThisStreet: number;
+  selfIsInPosition: boolean;
 }
 
 // ── Weighted action selection ───────────────────────────────────────────────
@@ -178,12 +180,13 @@ export function decideBotAction(
   const callAmount = ctx.legal.callAmount ?? 0;
   const potOdds = callAmount > 0 ? callAmount / (ctx.pot + callAmount) : 0;
 
-  // Stack depth categories
+  // Stack depth categories (3-tier)
   const effectiveStack = Math.min(ctx.heroStack, ctx.villainStack);
   const bb = ctx.bigBlind || 20;
   const stackDepth = effectiveStack / bb;
-  const isShallow = stackDepth < 15;
-  const isDeep = stackDepth > 40;
+  const isShort = stackDepth < 10;
+  const isMedium = stackDepth >= 10 && stackDepth < 25;
+  const isDeep = stackDepth >= 25;
 
   // Profile-derived adjustments
   const { aggression, bluffFrequency, looseness } = profile;
@@ -270,10 +273,44 @@ export function decideBotAction(
         break;
     }
 
-    // Shallow stack: reduce folding with decent hands, increase shove tendency
-    if (isShallow && (strength === "GOOD" || strength === "STRONG" || strength === "PREMIUM")) {
-      weights.RAISE *= 1.5;
-      weights.FOLD *= 0.3;
+    // ── Stack commitment: prevent embarrassing folds when already invested ──
+    if (ctx.street === "PREFLOP" && ctx.selfBetThisStreet > 0) {
+      const totalStack = ctx.selfBetThisStreet + ctx.heroStack;
+      if (totalStack > 0) {
+        const commitRatio = ctx.selfBetThisStreet / totalStack;
+        if (commitRatio >= 0.25 && strength !== "TRASH") {
+          weights.FOLD *= Math.max(0.1, 1 - commitRatio * 2);
+          weights.CALL = Math.max(weights.CALL, 0.5);
+        }
+      }
+    }
+
+    // ── Preflop defense vs small raises ──
+    if (ctx.street === "PREFLOP" && callAmount > 0 && !ctx.legal.canCheck) {
+      const raiseSize = callAmount / bb;
+      // Only defend when raise is small both in bb terms and relative to stack
+      if (raiseSize <= 3 && callAmount / ctx.heroStack < 0.15 && strength !== "TRASH") {
+        weights.FOLD *= 0.6;
+        weights.CALL *= 1.3;
+      }
+    }
+
+    // ── Short-stack push/fold widening ──
+    if (isShort) {
+      if (strength === "GOOD" || strength === "STRONG" || strength === "PREMIUM") {
+        weights.RAISE *= 2.0;
+        weights.FOLD *= 0.2;
+        weights.CALL = Math.max(weights.CALL, 0.6);
+      }
+      if (strength === "MEDIUM") {
+        weights.FOLD *= 0.2;
+        weights.RAISE *= 2.0;
+        weights.CALL = Math.max(weights.CALL, 0.6);
+      }
+      if (stackDepth < 5 && strength === "WEAK") {
+        weights.FOLD *= 0.3;
+        weights.CALL = Math.max(weights.CALL, 0.4);
+      }
     }
 
     // Previous aggressor check: if villain has been betting and we have a marginal hand, fold more
@@ -310,6 +347,64 @@ export function decideBotAction(
     }
   }
 
+  // ── Elite bot modifiers ──────────────────────────────────────────────────
+  // These only activate when the elite-specific config fields are set.
+
+  // Three-bet frequency: re-raise more often preflop
+  if (profile.threeBetFreq != null && ctx.street === "PREFLOP" && !ctx.legal.canCheck) {
+    if (strength === "PREMIUM" || strength === "STRONG") {
+      weights.RAISE *= (1 + profile.threeBetFreq * 2);
+    } else if (strength === "GOOD" || strength === "MEDIUM") {
+      weights.RAISE += profile.threeBetFreq * 0.3;
+      weights.FOLD *= (1 - profile.threeBetFreq * 0.3);
+    }
+  }
+
+  // Blind defense bonus: defend wider from BB
+  if (profile.blindDefenseBonus != null && ctx.street === "PREFLOP" && !ctx.selfIsInPosition && !ctx.legal.canCheck) {
+    weights.FOLD *= (1 - profile.blindDefenseBonus);
+    weights.CALL *= (1 + profile.blindDefenseBonus * 0.5);
+    if (strength === "GOOD" || strength === "STRONG" || strength === "PREMIUM") {
+      weights.RAISE *= (1 + profile.blindDefenseBonus * 0.5);
+    }
+  }
+
+  // Short-stack aggression: push harder when short-stacked
+  if (profile.shortStackAggression != null && isShort) {
+    if (strength !== "TRASH") {
+      weights.RAISE *= (1 + profile.shortStackAggression * 2);
+      weights.FOLD *= (1 - profile.shortStackAggression * 0.7);
+    }
+    if (strength === "TRASH") {
+      weights.RAISE += profile.shortStackAggression * bluffFrequency * 2;
+    }
+  }
+
+  // Trap frequency: slow-play strong hands (flop/turn only, capped, reduced on draw-heavy)
+  if (profile.trapFrequency != null && ctx.legal.canCheck) {
+    if ((strength === "PREMIUM" || strength === "STRONG") &&
+        (ctx.street === "FLOP" || ctx.street === "TURN")) {
+      const trapInfluence = boardTex === "draw_heavy"
+        ? Math.min(profile.trapFrequency, 0.7) * 0.5
+        : Math.min(profile.trapFrequency, 0.7);
+      weights.CHECK *= (1 + trapInfluence * 2);
+      weights.RAISE *= (1 - trapInfluence * 0.4);
+    }
+  }
+
+  // Double-barrel frequency: continue aggression on flop/turn
+  if (profile.doubleBarrelFreq != null && ctx.wasLastAggressor && ctx.legal.canCheck) {
+    if (ctx.street === "FLOP" || ctx.street === "TURN") {
+      if (strength === "GOOD" || strength === "MEDIUM") {
+        weights.RAISE *= (1 + profile.doubleBarrelFreq * 1.5);
+        weights.CHECK *= (1 - profile.doubleBarrelFreq * 0.3);
+      }
+      if (strength === "WEAK" || strength === "TRASH") {
+        weights.RAISE += profile.doubleBarrelFreq * bluffFrequency * 1.5;
+      }
+    }
+  }
+
   // ── Never fold into match loss ──
   // If folding would leave the bot with 0 chips (losing the match), always call instead
   if (weights.FOLD > 0 && ctx.heroStack <= callAmount) {
@@ -335,7 +430,7 @@ export function decideBotAction(
 
   if (action === "RAISE" && ctx.legal.minRaiseTo && ctx.legal.maxRaiseTo) {
     const raiseAmount = computeRaiseAmount(
-      ctx, strength, aggression, isShallow,
+      ctx, strength, profile, isShort, isMedium,
     );
     return { action: "RAISE_TO", amount: raiseAmount };
   }
@@ -348,18 +443,26 @@ export function decideBotAction(
 function computeRaiseAmount(
   ctx: BotGameContext,
   strength: HandStrength,
-  aggression: number,
-  isShallow: boolean,
+  profile: BotProfile,
+  isShort: boolean,
+  isMedium: boolean,
 ): number {
   const min = ctx.legal.minRaiseTo!;
   const max = ctx.legal.maxRaiseTo!;
 
-  // Shallow stacks: tend to shove
-  if (isShallow && (strength === "PREMIUM" || strength === "STRONG" || strength === "GOOD")) {
+  // Short stacks: tend to shove
+  if (isShort && (strength === "PREMIUM" || strength === "STRONG" || strength === "GOOD")) {
     return max; // all-in
   }
 
+  // Medium stacks (10-25bb): prefer 2.2-2.5x raises to apply pressure
+  if (isMedium && (strength === "PREMIUM" || strength === "STRONG")) {
+    const target = Math.round(ctx.bigBlind * 2.3);
+    return Math.min(Math.max(target, min), max);
+  }
+
   // Size based on hand strength and aggression
+  const { aggression } = profile;
   let potFraction: number;
   switch (strength) {
     case "PREMIUM":
