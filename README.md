@@ -7,9 +7,9 @@ RiverRank.io is a real-time multiplayer heads-up poker platform featuring ranked
 The application is designed as a production-style system demonstrating real-time communication, distributed state management, and secure backend validation.
 
 <!-- USER_COUNT_START -->
-**1,127** users | **809** matches completed
+**1,128** users | **847** matches completed
 
-*Last updated: 2026-03-29*
+*Last updated: 2026-03-30*
 <!-- USER_COUNT_END -->
 
 ---
