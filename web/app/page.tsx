@@ -669,12 +669,20 @@ function AccountCard({
 
 // ── Emote loadout card ───────────────────────────────────────────────────────
 
+const UNLOCK_HINTS: Record<string, string> = {
+  "good-boy": "Reach 2,000 Elo to unlock",
+};
+function getUnlockHint(emoteId: string): string {
+  return UNLOCK_HINTS[emoteId] ?? "Coming soon";
+}
+
 function EmoteLoadoutCard({ userId }: { userId: string }) {
   const [allEmotes, setAllEmotes]         = useState<EmoteDefinition[]>([]);
   const [ownedIds, setOwnedIds]           = useState<Set<string>>(new Set());
   const [equipped, setEquipped]           = useState<(EmoteDefinition | null)[]>([null, null, null, null]);
   const [pickingSlot, setPickingSlot]     = useState<number | null>(null);
   const [previewingEmoteId, setPreviewingEmoteId] = useState<string | null>(null);
+  const [hintEmoteId, setHintEmoteId]   = useState<string | null>(null);
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -900,17 +908,21 @@ function EmoteLoadoutCard({ userId }: { userId: string }) {
                 <button
                   key={emote.id}
                   onClick={() => {
-                    if (!owned) return;
+                    if (!owned) {
+                      setHintEmoteId((prev) => (prev === emote.id ? null : emote.id));
+                      return;
+                    }
                     previewEmote(emote, owned);
                     equipEmote(pickingSlot, emote);
                   }}
-                  disabled={!owned}
+                  onMouseEnter={() => { if (!owned) setHintEmoteId(emote.id); }}
+                  onMouseLeave={() => { if (!owned) setHintEmoteId(null); }}
                   style={{
                     width: "100%",
                     aspectRatio: "1",
                     background: "none",
                     border: "none",
-                    cursor: owned ? "pointer" : "not-allowed",
+                    cursor: owned ? "pointer" : "default",
                     opacity: owned ? 1 : 0.35,
                     display: "flex",
                     alignItems: "center",
@@ -918,7 +930,7 @@ function EmoteLoadoutCard({ userId }: { userId: string }) {
                     padding: 4,
                     position: "relative",
                   }}
-                  title={owned ? emote.name : `${emote.name} (locked)`}
+                  title={owned ? emote.name : undefined}
                 >
                   <EmoteFrame
                     tier={emote.tier}
@@ -975,6 +987,11 @@ function EmoteLoadoutCard({ userId }: { userId: string }) {
               );
             })}
           </div>
+          {hintEmoteId && !ownedIds.has(hintEmoteId) && (
+            <div style={{ fontSize: 11, color: "var(--text2)", textAlign: "center", marginTop: 4 }}>
+              {getUnlockHint(hintEmoteId)}
+            </div>
+          )}
         </div>
       )}
     </Card>
